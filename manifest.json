@@ -1,6 +1,6 @@
 {
-  "name": "توجفن - متجرك الذكي",
-  "short_name": "توجفن",
+  "name": "Todo",
+  "short_name": "Todo",
   "description": "متجر إلكتروني حديث مع دعم الوضع الليلي والتصنيفات المتعددة",
   "start_url": "./index.html",
   "display": "standalone",
