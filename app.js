@@ -96,7 +96,8 @@ class App {
         this.setupSettingsModal();
     }
 
-    async fetchFreshData() {
+    async fetchFreshData(retryCount = 0) {
+        const MAX_RETRIES = CONFIG.FETCH_RETRY_COUNT || 3;
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT);
@@ -110,7 +111,15 @@ class App {
             this.showOfflineToast(false);
             this.hideOfflinePage();
         } catch (err) {
-            console.error("Fetch failed:", err);
+            console.error(`Fetch failed (attempt ${retryCount + 1}):`, err);
+            // Retry logic: try up to MAX_RETRIES times with increasing delay
+            if (retryCount < MAX_RETRIES - 1 && navigator.onLine) {
+                const delay = Math.min(1000 * Math.pow(2, retryCount), 8000); // exponential backoff: 1s, 2s, 4s
+                console.log(`Retrying in ${delay}ms...`);
+                setTimeout(() => this.fetchFreshData(retryCount + 1), delay);
+                return;
+            }
+            // All retries exhausted
             if (!this.fullData) {
                 this.showOfflinePage();
             } else {
