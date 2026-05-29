@@ -6,10 +6,15 @@ export class StorageService {
         this.useFallback = false;
         this.ready = false;
         this.lastTimestamp = null;
-        this.initPromise = this.init();
+        this.initPromise = this._initInternal();
     }
 
     async init() {
+        // Public init: wait for internal init to finish
+        return this.initPromise;
+    }
+
+    async _initInternal() {
         try {
             if (!window.Dexie) {
                 throw new Error("Dexie library not loaded");
@@ -30,7 +35,7 @@ export class StorageService {
 
     async waitForReady() {
         if (this.ready) return;
-        await this.initPromise;
+        return this.initPromise;
     }
 
     // ========== إدارة الصور ==========
