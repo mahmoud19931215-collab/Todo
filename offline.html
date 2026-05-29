@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>غير متصل - توجفن</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Cairo', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            color: #ecf0f1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            direction: rtl;
+            text-align: center;
+            padding: 20px;
+        }
+        .offline-card {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(12px);
+            border-radius: 48px;
+            padding: 40px 30px;
+            max-width: 360px;
+            width: 100%;
+            box-shadow: 0 25px 45px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.2);
+            animation: fadeIn 0.5s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .icon {
+            font-size: 80px;
+            color: #f39c12;
+            margin-bottom: 20px;
+            animation: float 2s infinite alternate;
+        }
+        @keyframes float {
+            0% { transform: translateY(0); }
+            100% { transform: translateY(-10px); }
+        }
+        h2 {
+            font-size: 28px;
+            margin-bottom: 15px;
+            font-weight: 800;
+        }
+        p {
+            font-size: 16px;
+            opacity: 0.8;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+        button {
+            background: #2ecc71;
+            border: none;
+            padding: 12px 28px;
+            border-radius: 40px;
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+            font-family: inherit;
+            cursor: pointer;
+            transition: transform 0.2s, background 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+        }
+        button:active {
+            transform: scale(0.96);
+            background: #27ae60;
+        }
+        .retry-icon {
+            font-size: 18px;
+        }
+        .footer-note {
+            margin-top: 25px;
+            font-size: 12px;
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="offline-card">
+        <div class="icon">
+            <i class="fas fa-wifi-slash"></i>
+        </div>
+        <h2>❌ غير متصل بالإنترنت</h2>
+        <p>لا يمكن تحميل البيانات. يرجى التحقق من اتصالك بالشبكة ثم حاول مرة أخرى.</p>
+        <button id="retryOfflineBtn">
+            <i class="fas fa-sync-alt retry-icon"></i> إعادة المحاولة
+        </button>
+        <div class="footer-note">
+            <i class="fas fa-database"></i> قد تعرض نسخة مخبأة عند العودة للاتصال
+        </div>
+    </div>
+    <script>
+        document.getElementById('retryOfflineBtn').addEventListener('click', () => {
+            if (navigator.onLine) {
+                window.location.href = './index.html';
+            } else {
+                alert('لا يزال الجهاز غير متصل بالإنترنت. يرجى الاتصال بالشبكة.');
+            }
+        });
+        // إذا عاد الاتصال أثناء عرض هذه الصفحة، نعيد التوجيه تلقائياً
+        window.addEventListener('online', () => {
+            window.location.href = './index.html';
+        });
+    </script>
+</body>
+</html>

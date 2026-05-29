@@ -1,0 +1,73 @@
+{
+  "name": "توجفن - متجرك الذكي",
+  "short_name": "توجفن",
+  "description": "متجر إلكتروني حديث مع دعم الوضع الليلي والتصنيفات المتعددة",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#2ecc71",
+  "theme_color": "#2ecc71",
+  "orientation": "portrait",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "https://via.placeholder.com/72?text=T",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://via.placeholder.com/96?text=T",
+      "sizes": "96x96",
+      "type": "image/png"
+    },
+    {
+      "src": "https://via.placeholder.com/128?text=T",
+      "sizes": "128x128",
+      "type": "image/png"
+    },
+    {
+      "src": "https://via.placeholder.com/144?text=T",
+      "sizes": "144x144",
+      "type": "image/png"
+    },
+    {
+      "src": "https://via.placeholder.com/152?text=T",
+      "sizes": "152x152",
+      "type": "image/png"
+    },
+    {
+      "src": "https://via.placeholder.com/192?text=T",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://via.placeholder.com/384?text=T",
+      "sizes": "384x384",
+      "type": "image/png"
+    },
+    {
+      "src": "https://via.placeholder.com/512?text=T",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "السلة",
+      "short_name": "سلة",
+      "description": "عرض سلة المشتريات",
+      "url": "./index.html?action=cart",
+      "icons": [{ "src": "https://via.placeholder.com/96?text=C", "sizes": "96x96" }]
+    },
+    {
+      "name": "البحث",
+      "short_name": "بحث",
+      "description": "البحث عن منتج",
+      "url": "./index.html?action=search",
+      "icons": [{ "src": "https://via.placeholder.com/96?text=S", "sizes": "96x96" }]
+    }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false
+}
