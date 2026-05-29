@@ -1,4 +1,4 @@
-/* ==================== ملف الأنماط الرئيسي لتوجفن - نسخة محسّنة ==================== */
+/* ==================== ملف الأنماط الرئيسي لتوجفن - نسخة محسّنة للموبايل ==================== */
 
 /* ========== الثوابت والمتغيرات ========== */
 :root {
@@ -22,7 +22,7 @@
     --shadow-sm: 0 2px 12px rgba(46,204,113,0.08);
     --shadow-md: 0 8px 28px rgba(46,204,113,0.14);
     --shadow-lg: 0 16px 48px rgba(0,0,0,0.14);
-    --radius-card: 24px;
+    --radius-card: 20px;
     --radius-btn: 40px;
     --transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
     --font: 'Cairo', 'Segoe UI', sans-serif;
@@ -371,11 +371,11 @@ body {
 }
 .products-grid-inner {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     gap: 14px;
 }
 
-/* ===== بطاقة المنتج ===== */
+/* ===== بطاقة المنتج (محسّنة للموبايل) ===== */
 .product-card {
     background: var(--surface);
     border-radius: var(--radius-card);
@@ -406,7 +406,7 @@ body {
     transform: translateY(-2px) scale(0.99);
 }
 
-/* صورة المنتج */
+/* صورة المنتج - تغطي العرض بالكامل وزوايا منحنية */
 .product-img {
     width: 100%;
     aspect-ratio: 1 / 1;
@@ -414,22 +414,23 @@ body {
     background: linear-gradient(135deg, #f0faf5, #e8f7f0);
     display: block;
     transition: transform 0.35s ease;
+    /* جعل الصورة تلتصق بالحافة العلوية للبطاقة مع انحناء الزوايا العلوية فقط */
     border-radius: var(--radius-card) var(--radius-card) 0 0;
     position: relative;
     z-index: 1;
 }
 .product-card:hover .product-img {
-    transform: scale(1.04);
+    transform: scale(1.02);
 }
 
 /* تفاصيل المنتج */
 .product-info {
-    padding: 12px 14px 14px;
+    padding: 12px 12px 14px;
     text-align: center;
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     position: relative;
     z-index: 1;
 }
@@ -452,7 +453,7 @@ body {
     justify-content: center;
     gap: 4px;
     background: var(--primary-glow);
-    padding: 4px 14px;
+    padding: 5px 14px;
     border-radius: 30px;
     border: 1px solid rgba(46,204,113,0.2);
     align-self: center;
@@ -467,20 +468,20 @@ body {
     align-self: center;
 }
 
-/* أزرار الكمية */
+/* أزرار الكمية (محسّنة للمس على الموبايل) */
 .qty-controls {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 10px;
     margin-top: 6px;
 }
 .qty-btn {
     border: none;
-    width: 34px;
-    height: 34px;
+    width: 38px;
+    height: 38px;
     border-radius: 50%;
-    font-size: 18px;
+    font-size: 20px;
     font-weight: bold;
     cursor: pointer;
     transition: var(--transition);
@@ -494,24 +495,24 @@ body {
     color: white;
     box-shadow: 0 3px 10px var(--primary-glow);
 }
-.qty-btn.inc-qty:hover { background: var(--primary-dark); transform: scale(1.08); }
-.qty-btn.inc-qty:active { transform: scale(0.9); box-shadow: none; }
+.qty-btn.inc-qty:hover { background: var(--primary-dark); transform: scale(1.05); }
+.qty-btn.inc-qty:active { transform: scale(0.92); box-shadow: none; }
 .qty-btn.dec-qty {
     background: rgba(231,76,60,0.1);
     color: var(--danger);
     border: 1.5px solid rgba(231,76,60,0.2);
 }
-.qty-btn.dec-qty:hover { background: var(--danger); color: white; transform: scale(1.08); }
-.qty-btn.dec-qty:active { transform: scale(0.9); }
+.qty-btn.dec-qty:hover { background: var(--danger); color: white; transform: scale(1.05); }
+.qty-btn.dec-qty:active { transform: scale(0.92); }
 .qty-input {
-    width: 44px;
+    width: 50px;
     text-align: center;
-    font-size: 16px;
+    font-size: 17px;
     font-weight: 800;
     background: var(--surface);
     border: 1.5px solid var(--border-light);
     border-radius: 30px;
-    padding: 4px;
+    padding: 6px 4px;
     color: var(--text-dark);
     font-family: var(--font);
     outline: none;
@@ -760,13 +761,12 @@ body {
 /* ========== سكيلتون التحميل ========== */
 .skeleton-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     gap: 14px;
 }
 .skeleton-card {
     background: var(--surface);
     border-radius: var(--radius-card);
-    padding: 0;
     overflow: hidden;
     border: 1px solid var(--border-light);
     animation: pulse 1.4s ease-in-out infinite;
@@ -903,19 +903,74 @@ body {
     padding: 0 2px;
 }
 
-/* ========== متجاوب ========== */
-@media (max-width: 640px) {
+/* ========== تحسينات خاصة للموبايل (شاشات ضيقة جداً) ========== */
+@media (max-width: 480px) {
+    /* جعل البطاقات في عمود واحد */
+    .products-grid-inner {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+    .skeleton-grid {
+        grid-template-columns: 1fr;
+    }
+    /* تكبير الصورة قليلاً وجعلها تتنفس */
+    .product-img {
+        border-radius: var(--radius-card) var(--radius-card) 0 0;
+    }
+    /* توسيع أزرار التحكم لسهولة اللمس */
+    .qty-btn {
+        width: 44px;
+        height: 44px;
+        font-size: 22px;
+    }
+    .qty-input {
+        width: 60px;
+        font-size: 18px;
+        padding: 8px 4px;
+    }
+    .product-name {
+        font-size: 16px;
+    }
+    .product-price {
+        font-size: 16px;
+        padding: 6px 16px;
+    }
+    /* رأس التطبيق أكثر راحة */
+    .app-header {
+        padding: 8px 12px;
+        gap: 8px;
+    }
+    .icon-btn {
+        width: 40px;
+        height: 40px;
+    }
+    /* تحسين ظهور الفوتر العائم */
+    .cart-floating-footer {
+        padding: 10px 16px;
+    }
+    .total-value {
+        font-size: 20px;
+    }
+    .whatsapp-btn {
+        padding: 8px 16px;
+        font-size: 13px;
+    }
+}
+
+/* ========== متجاوب للشاشات المتوسطة والكبيرة ========== */
+@media (min-width: 481px) and (max-width: 640px) {
     .products-grid-inner {
         grid-template-columns: repeat(2, 1fr);
-        gap: 10px;
+        gap: 12px;
+    }
+    .skeleton-grid {
+        grid-template-columns: repeat(2, 1fr);
     }
     .product-info { padding: 10px 10px 12px; }
-    .product-name { font-size: 13px; }
-    .product-price { font-size: 13px; padding: 3px 11px; }
-    .qty-btn { width: 30px; height: 30px; font-size: 16px; }
-    .qty-input { width: 38px; font-size: 14px; }
-    .app-header { padding: 8px 12px; }
-    .skeleton-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .product-name { font-size: 14px; }
+    .product-price { font-size: 14px; padding: 4px 12px; }
+    .qty-btn { width: 34px; height: 34px; font-size: 18px; }
+    .qty-input { width: 48px; font-size: 16px; }
 }
 
 @media (min-width: 641px) and (max-width: 900px) {
