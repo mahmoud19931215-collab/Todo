@@ -379,3 +379,7 @@ export class ProductsGrid {
         return total;
     }
 }
+
+
+
+
