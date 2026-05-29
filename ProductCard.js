@@ -194,3 +194,6 @@ export class ProductCard {
         return this.product;
     }
 }
+
+
+
