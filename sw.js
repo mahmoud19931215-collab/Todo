@@ -110,3 +110,6 @@ self.addEventListener('message', event => {
     });
   }
 });
+
+
+
