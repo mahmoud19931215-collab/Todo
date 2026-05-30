@@ -1,5 +1,5 @@
 // sw.js - نسخة هندسية مطهرة ومقاومة لظروف انقطاع الشبكة والاتصالات البطيئة
-const CACHE_NAME = 'aleppo-delivery-v1.0.0';
+const CACHE_NAME = 'aleppo-delivery-v1.0.1'; // تم تحديث الإصدار لفرض تحديث ملف config.js الجديد
 const OFFLINE_URL = './offline.html';
 
 // الملفات الاستراتيجية والحرجة التي يتوجب حزمها مسبقاً لضمان العمل التام Offline
