@@ -1,5 +1,5 @@
 // ProductCard.js
-import { escapeHtml } from './config.js';
+import { CONFIG, escapeHtml } from './config.js';
 
 export class ProductCard {
     constructor(product, storage, onQuantityChange, initialQty = 0) {
@@ -16,7 +16,7 @@ export class ProductCard {
         // حالة السلايدر
         this.images = [];
         this.currentIndex = 0;
-        this.blobs = new Map();            // url → objectURL
+        this.blobs = new Map();
         this.track = null;
         this.slides = [];
         this.dots = [];
@@ -24,14 +24,11 @@ export class ProductCard {
         this.isDragging = false;
         this.dragStartX = 0;
         this.dragMoved = false;
-        this.trackTransition = '';
 
-        // تجنب إعادة التحميل المتكرر لنفس الصورة
-        this.loadingPromises = new Map();  // url → Promise
-        this.loadedUrls = new Set();       // مجموعة عناوين تم تحميلها بنجاح
+        this.loadingPromises = new Map();
+        this.loadedUrls = new Set();
     }
 
-    // جمع روابط الصور (نفس المنطق الأصلي لكن مع تحسين الأداء)
     _collectImages() {
         if (Array.isArray(this.product.images)) {
             return this.product.images.filter(u => u && u.startsWith('http'));
@@ -53,7 +50,6 @@ export class ProductCard {
         card.setAttribute('data-price', this.product.price);
         card.setAttribute('data-stock', this.product.stock || 999);
 
-        // حاوية الصور
         const imgBox = document.createElement('div');
         imgBox.className = `sl-wrap${hasMultiple ? ' sl-multi' : ''}`;
 
@@ -62,7 +58,6 @@ export class ProductCard {
             imgBox.appendChild(img);
             this.slides = [img];
         } else {
-            // إنشاء المسار (track)
             this.track = document.createElement('div');
             this.track.className = 'sl-track';
             const slideWidthPercent = 100 / this.images.length;
@@ -79,7 +74,6 @@ export class ProductCard {
             }
             imgBox.appendChild(this.track);
 
-            // منطقتي اليمين واليسار
             const rightZone = this._createZone('sl-zr');
             const leftZone = this._createZone('sl-zl');
             imgBox.appendChild(rightZone);
@@ -94,7 +88,6 @@ export class ProductCard {
                 this.goTo(this.currentIndex - 1);
             });
 
-            // النقاط
             const dotsContainer = document.createElement('div');
             dotsContainer.className = 'sl-dots';
             for (let i = 0; i < this.images.length; i++) {
@@ -109,7 +102,6 @@ export class ProductCard {
             }
             imgBox.appendChild(dotsContainer);
 
-            // العداد
             const counterDiv = document.createElement('div');
             counterDiv.className = 'sl-ctr';
             const counterBold = document.createElement('b');
@@ -120,11 +112,9 @@ export class ProductCard {
             this.counterSpan = counterBold;
             imgBox.appendChild(counterDiv);
 
-            // أحداث السحب
             this._bindDrag(imgBox);
         }
 
-        // معلومات المنتج
         const info = document.createElement('div');
         info.className = 'product-info';
         const subtotalDisplay = this.quantity > 0
@@ -150,7 +140,6 @@ export class ProductCard {
         this.subtotalSpan = info.querySelector('.subtotal-val');
         this.subtotalRow = info.querySelector('.item-subtotal');
 
-        // ربط أحداث الكمية (مع debounce مدمج)
         const incBtn = info.querySelector('.inc-qty');
         const decBtn = info.querySelector('.dec-qty');
         incBtn.addEventListener('click', (e) => { e.stopPropagation(); this.changeQuantity(1); });
@@ -168,7 +157,6 @@ export class ProductCard {
             this.qtyInput.value = this.quantity;
         });
 
-        // بدء تحميل الصور بشكل كسول
         this._loadAllImages();
         this.updateUI();
         return card;
@@ -179,8 +167,8 @@ export class ProductCard {
         img.className = 'sl-img';
         img.alt = escapeHtml(this.product.name);
         img.loading = 'lazy';
-        // placeholder خفيف جداً
-        img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"%3E%3C/svg%3E';
+        // إصلاح: استخدام placeholder من CONFIG بدلاً من SVG فارغ
+        img.src = CONFIG.IMAGE_PLACEHOLDER;
         img.dataset.index = index;
         return img;
     }
@@ -191,15 +179,12 @@ export class ProductCard {
         return zone;
     }
 
-    // تحميل جميع الصور (مع استخدام خريطة وعود لتجنب التكرار)
     async _loadAllImages() {
         if (this.images.length === 0) {
             this._setPlaceholder(0);
             return;
         }
-        // الصورة الأولى فورية
         await this._loadOneImage(0, true);
-        // باقي الصور في الخلفية
         for (let i = 1; i < this.images.length; i++) {
             this._loadOneImage(i, false);
         }
@@ -209,7 +194,6 @@ export class ProductCard {
         const url = this.images[index];
         if (!url || this.loadedUrls.has(url)) return;
 
-        // تجنب الطلبات المتزامنة المتكررة لنفس الـ url
         if (this.loadingPromises.has(url)) {
             const blobUrl = await this.loadingPromises.get(url);
             if (blobUrl) this._applyImage(index, blobUrl);
@@ -217,7 +201,6 @@ export class ProductCard {
         }
 
         const loadPromise = (async () => {
-            // أولاً: التحقق من التخزين المؤقت (IndexedDB)
             try {
                 const blob = await this.storage.getImageBlob(url);
                 if (blob) {
@@ -225,17 +208,14 @@ export class ProductCard {
                     this.blobs.set(url, objUrl);
                     return objUrl;
                 }
-            } catch (e) { /* فشل التخزين المؤقت */ }
+            } catch (e) {}
 
-            // ثانياً: التحميل المباشر
             try {
-                if (urgent) this._applyImage(index, url);  // عرض الرابط المباشر مؤقتاً
                 const response = await fetch(url, { mode: 'cors', cache: 'force-cache' });
                 if (!response.ok) throw new Error('HTTP error');
                 const blob = await response.blob();
                 const objUrl = URL.createObjectURL(blob);
                 this.blobs.set(url, objUrl);
-                // حفظ في IndexedDB في الخلفية (لا ننتظر)
                 this.storage.saveImageBlob(url, blob).catch(() => {});
                 return objUrl;
             } catch (err) {
@@ -258,15 +238,15 @@ export class ProductCard {
         const slide = this.slides[index];
         if (!slide) return;
         const img = slide.querySelector('.sl-img') || slide;
-        if (img && img.src !== src) img.src = src;
+        if (img && img.src !== src) {
+            img.src = src;
+        }
     }
 
     _setPlaceholder(index) {
-        const placeholder = 'https://via.placeholder.com/300?text=No+Image';
-        this._applyImage(index, placeholder);
+        this._applyImage(index, CONFIG.IMAGE_PLACEHOLDER);
     }
 
-    // التنقل
     goTo(nextIndex) {
         const n = this.images.length;
         if (n <= 1) return;
@@ -299,7 +279,6 @@ export class ProductCard {
         if (this.counterSpan) this.counterSpan.textContent = this.currentIndex + 1;
     }
 
-    // السحب باللمس أو الفأرة
     _bindDrag(el) {
         const handleStart = (clientX) => {
             this.isDragging = true;
@@ -326,12 +305,10 @@ export class ProductCard {
             if (this.track) this._syncTrack(true);
         };
 
-        // الفأرة
         el.addEventListener('mousedown', (e) => handleStart(e.clientX));
         window.addEventListener('mousemove', (e) => { if (this.isDragging) handleMove(e.clientX); });
         window.addEventListener('mouseup', (e) => { if (this.isDragging) handleEnd(e.clientX); });
 
-        // اللمس
         el.addEventListener('touchstart', (e) => handleStart(e.touches[0].clientX), { passive: true });
         el.addEventListener('touchmove', (e) => {
             if (!this.isDragging) return;
@@ -342,7 +319,6 @@ export class ProductCard {
         });
     }
 
-    // تحديث واجهة الكمية
     updateUI() {
         if (this.qtyInput) this.qtyInput.value = this.quantity;
         if (this.subtotalSpan) {
@@ -355,7 +331,6 @@ export class ProductCard {
         }
     }
 
-    // تغيير الكمية مع debounce وإضافة تأثير بصري
     changeQuantity(delta) {
         if (this.debounceTimer) clearTimeout(this.debounceTimer);
         this.debounceTimer = setTimeout(() => {
@@ -364,7 +339,6 @@ export class ProductCard {
             if (diff !== 0) {
                 this.quantity = newQty;
                 this.updateUI();
-                // تأثير إضافة
                 if (this.element) {
                     this.element.classList.add('added');
                     setTimeout(() => this.element.classList.remove('added'), 300);
@@ -390,11 +364,8 @@ export class ProductCard {
         }
     }
 
-    // تنظيف (لتجنب تسرب الذاكرة)
     destroy() {
-        // إبطال مؤقتات
         if (this.debounceTimer) clearTimeout(this.debounceTimer);
-        // إبطال روابط الـ objectURL
         for (const [_, objUrl] of this.blobs.entries()) {
             URL.revokeObjectURL(objUrl);
         }
