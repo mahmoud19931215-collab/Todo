@@ -1,3 +1,4 @@
+// ProductsGrid.js
 import { CONFIG } from './config.js';
 import { ProductCard } from './ProductCard.js';
 
@@ -6,28 +7,44 @@ export class ProductsGrid {
         this.container = document.getElementById(containerId);
         this.storage = storage;
         this.onGlobalQuantityChange = onGlobalQuantityChange;
+        
+        // البيانات الأساسية
         this.rawData = null;
         this.mainCategories = new Set();
-        this.subCategoriesMap = new Map();
-        this.productsMap = new Map();
+        this.subCategoriesMap = new Map();   // mainCat -> Set of subCats
+        this.productsMap = new Map();        // "main|sub" -> products array
+        
+        // الحالة
         this.activeMain = 'all';
         this.activeSub = null;
         this.searchQuery = '';
-        this.currentPageMap = new Map();
-        this.loadMoreButtons = new Map();
+        this.currentPageMap = new Map();      // "main|sub" -> current page index
+        this.loadMoreButtons = new Map();     // حفظ أزرار "عرض المزيد" لكل قسم
+        
+        // قائمة الأقسام المعروضة (main+sub)
         this.allSectionsList = [];
         this.visibleSectionsCount = 6;
         this.sectionsPerLoad = 6;
         this.sectionsLoadMoreBtn = null;
-        this.cards = [];
+        
+        // عناصر واجهة
+        this.cards = [];              // { mainCat, subCat, card, element }
         this.imagesLoaded = 0;
         this.totalImages = 0;
         this.onImageProgress = null;
         this.skeleton = document.getElementById('skeletonLoader');
         this.productsGridDiv = document.getElementById('productsGrid');
+        
+        // تحسين الأداء: تخزين مؤقت لنتائج البحث لكل قسم (خريطة متداخلة)
+        this.searchCache = new Map();  // key: `${mainCat}|${subCat}|${query}` -> products filtered
+        
+        // منع الرندر المتزامن الكبير
         this.isRendering = false;
-        this.renderQueue = [];      // قائمة انتظار للتصنيفات التي لم ترسم بعد
-        this.batchSize = 2;         // عدد التصنيفات التي ترسم دفعة واحدة (تحسين الأداء)
+        this.renderQueue = [];
+        this.batchSize = 2;            // أقسام لكل دفعة
+        
+        // debounce للبحث
+        this.searchDebounceTimer = null;
     }
 
     setImageProgressCallback(cb) {
@@ -45,16 +62,18 @@ export class ProductsGrid {
     loadData(data) {
         this.rawData = data;
         this.clear();
-        // بناء الخرائط بشكل أسرع باستخدام for...of
+        
+        // بناء الخرائط بكفاءة - استخدام for...of مع إدخالات مباشرة
         for (const [mainCat, subCatsObj] of Object.entries(data)) {
             this.mainCategories.add(mainCat);
             const subSet = new Set();
             for (const [subCat, products] of Object.entries(subCatsObj)) {
                 subSet.add(subCat);
+                // معالجة المنتجات مرة واحدة وتخزينها
                 const validProducts = products.map(p => ({
                     ...p,
-                    imageUrl: p.imageUrl?.startsWith('http') ? p.imageUrl : 'https://via.placeholder.com/300?text=No+Image',
-                    stock: p.stock !== undefined ? p.stock : 999
+                    imageUrl: (p.imageUrl && p.imageUrl.startsWith('http')) ? p.imageUrl : 'https://via.placeholder.com/300?text=No+Image',
+                    stock: (p.stock !== undefined && p.stock !== null) ? p.stock : 999
                 }));
                 const key = `${mainCat}|${subCat}`;
                 this.productsMap.set(key, validProducts);
@@ -62,11 +81,13 @@ export class ProductsGrid {
             }
             this.subCategoriesMap.set(mainCat, subSet);
         }
+        
         this.buildAllSectionsList();
         this.renderVisibleSections();
     }
 
     buildAllSectionsList() {
+        // إعادة بناء القائمة بناءً على الفلاتر النشطة
         this.allSectionsList = [];
         if (this.activeMain === 'all') {
             for (let mainCat of this.mainCategories) {
@@ -88,23 +109,24 @@ export class ProductsGrid {
     }
 
     renderVisibleSections() {
-        if (!this.productsGridDiv) return;
-        if (this.isRendering) return;
+        if (!this.productsGridDiv || this.isRendering) return;
         this.isRendering = true;
+        
+        // إعادة تعيين العدادات
         this.productsGridDiv.innerHTML = '';
         this.cards = [];
         this.totalImages = 0;
         this.imagesLoaded = 0;
         this.renderQueue = [];
-
+        
         const sectionsToShow = this.allSectionsList.slice(0, this.visibleSectionsCount);
-        // إضافة جميع الأقسام إلى قائمة الانتظار
-        for (const { mainCat, subCat } of sectionsToShow) {
-            this.renderQueue.push({ mainCat, subCat });
+        for (const section of sectionsToShow) {
+            this.renderQueue.push(section);
         }
-        // بدء الرسم المجمع
+        
         this.processRenderQueue();
-
+        
+        // إدارة زر "تحميل المزيد من التصنيفات"
         const hasMoreSections = this.allSectionsList.length > this.visibleSectionsCount;
         if (hasMoreSections && !this.searchQuery) {
             if (!this.sectionsLoadMoreBtn) {
@@ -119,12 +141,12 @@ export class ProductsGrid {
         } else if (this.sectionsLoadMoreBtn) {
             this.sectionsLoadMoreBtn.style.display = 'none';
         }
-
+        
         if (this.searchQuery) {
             if (this.sectionsLoadMoreBtn) this.sectionsLoadMoreBtn.style.display = 'none';
-            this.loadMoreButtons.forEach(btn => btn.style.display = 'none');
+            this.loadMoreButtons.forEach(btn => { if(btn) btn.style.display = 'none'; });
         }
-
+        
         if (this.skeleton) this.skeleton.style.display = 'none';
         if (this.productsGridDiv) this.productsGridDiv.style.display = 'grid';
         this.isRendering = false;
@@ -132,29 +154,35 @@ export class ProductsGrid {
 
     processRenderQueue() {
         if (this.renderQueue.length === 0) return;
-        // رسم عدد محدود من الأقسام في كل دورة لتجنب تجميد الواجهة
         const batch = this.renderQueue.splice(0, this.batchSize);
         for (const { mainCat, subCat } of batch) {
             const key = `${mainCat}|${subCat}`;
             let products = this.productsMap.get(key) || [];
+            
+            // تطبيق البحث إذا كان موجوداً
             if (this.searchQuery) {
-                const lowerQuery = this.searchQuery.toLowerCase();
-                products = products.filter(p => p.name.toLowerCase().includes(lowerQuery));
-                if (products.length === 0) continue;
-                this.renderSubCategoryFull(mainCat, subCat, products);
+                const cacheKey = `${key}|${this.searchQuery}`;
+                let filtered = this.searchCache.get(cacheKey);
+                if (!filtered) {
+                    const lowerQuery = this.searchQuery.toLowerCase();
+                    filtered = products.filter(p => p.name.toLowerCase().includes(lowerQuery));
+                    this.searchCache.set(cacheKey, filtered);
+                }
+                if (filtered.length === 0) continue;
+                this.renderSubCategoryFull(mainCat, subCat, filtered);
             } else {
                 this.renderSubCategoryPaginated(mainCat, subCat, products);
             }
         }
-        // استخدام requestIdleCallback أو setTimeout لتفادي حظر الواجهة
+        
         if (this.renderQueue.length > 0) {
-            requestIdleCallback ? requestIdleCallback(() => this.processRenderQueue()) : setTimeout(() => this.processRenderQueue(), 10);
+            // استخدام requestIdleCallback أو setTimeout لتجنب حظر الواجهة
+            if (typeof requestIdleCallback !== 'undefined') {
+                requestIdleCallback(() => this.processRenderQueue(), { timeout: 50 });
+            } else {
+                setTimeout(() => this.processRenderQueue(), 10);
+            }
         }
-    }
-
-    loadMoreSections() {
-        this.visibleSectionsCount += this.sectionsPerLoad;
-        this.renderVisibleSections();
     }
 
     renderSubCategoryFull(mainCat, subCat, products) {
@@ -164,23 +192,23 @@ export class ProductsGrid {
             const wrapper = document.createElement('div');
             wrapper.className = 'category-section';
             wrapper.id = sectionId;
-            wrapper.innerHTML = `<div class="category-header" data-main="${mainCat}" data-sub="${subCat}">${mainCat} <span style="font-size:14px; color:var(--primary);"> / ${subCat}</span></div><div class="products-grid-inner" id="inner-${mainCat}-${subCat}"></div>`;
+            wrapper.innerHTML = `<div class="category-header" data-main="${mainCat}" data-sub="${subCat}">${this.escapeHtml(mainCat)} <span style="font-size:14px; color:var(--primary);"> / ${this.escapeHtml(subCat)}</span></div><div class="products-grid-inner" id="inner-${mainCat}-${subCat}"></div>`;
             this.productsGridDiv.appendChild(wrapper);
             sectionEl = wrapper;
         }
         const innerDiv = sectionEl.querySelector(`#inner-${mainCat}-${subCat}`);
         if (!innerDiv) return;
-
+        
         innerDiv.innerHTML = '';
         const fragment = document.createDocumentFragment();
-        products.forEach(product => {
+        for (const product of products) {
             const card = this.createCardInstance(product, mainCat, subCat);
             fragment.appendChild(card.element);
             this.cards.push({ mainCat, subCat, card, element: card.element });
             this.totalImages++;
-        });
+        }
         innerDiv.appendChild(fragment);
-
+        
         const key = `${mainCat}|${subCat}`;
         const btn = this.loadMoreButtons.get(key);
         if (btn) btn.style.display = 'none';
@@ -193,30 +221,31 @@ export class ProductsGrid {
             const wrapper = document.createElement('div');
             wrapper.className = 'category-section';
             wrapper.id = sectionId;
-            wrapper.innerHTML = `<div class="category-header" data-main="${mainCat}" data-sub="${subCat}">${mainCat} <span style="font-size:14px; color:var(--primary);"> / ${subCat}</span></div><div class="products-grid-inner" id="inner-${mainCat}-${subCat}"></div>`;
+            wrapper.innerHTML = `<div class="category-header" data-main="${mainCat}" data-sub="${subCat}">${this.escapeHtml(mainCat)} <span style="font-size:14px; color:var(--primary);"> / ${this.escapeHtml(subCat)}</span></div><div class="products-grid-inner" id="inner-${mainCat}-${subCat}"></div>`;
             this.productsGridDiv.appendChild(wrapper);
             sectionEl = wrapper;
         }
+        
         const key = `${mainCat}|${subCat}`;
         const currentPage = this.currentPageMap.get(key) || 0;
         const start = currentPage * CONFIG.ITEMS_PER_PAGE;
         const end = start + CONFIG.ITEMS_PER_PAGE;
         const pageProducts = products.slice(start, end);
-
+        
         const innerDiv = sectionEl.querySelector(`#inner-${mainCat}-${subCat}`);
         if (!innerDiv) return;
-
+        
         if (currentPage === 0) innerDiv.innerHTML = '';
-
+        
         const fragment = document.createDocumentFragment();
-        pageProducts.forEach(product => {
+        for (const product of pageProducts) {
             const card = this.createCardInstance(product, mainCat, subCat);
             fragment.appendChild(card.element);
             this.cards.push({ mainCat, subCat, card, element: card.element });
             this.totalImages++;
-        });
+        }
         innerDiv.appendChild(fragment);
-
+        
         this.currentPageMap.set(key, currentPage + 1);
         const hasMore = end < products.length;
         let loadBtn = this.loadMoreButtons.get(key);
@@ -237,15 +266,13 @@ export class ProductsGrid {
         const initialQty = savedCart[product.name] || 0;
         const card = new ProductCard(product, this.storage, (name, newQty, delta) => this.onCardQuantityChange(name, newQty, delta), initialQty);
         const cardElement = card.render();
-        const img = cardElement.querySelector('.product-img');
-        if (img) {
-            img.loading = 'lazy';
-            if (!img.complete) {
-                img.addEventListener('load', () => this.imageLoaded());
-                img.addEventListener('error', () => this.imageLoaded());
-            } else {
-                this.imageLoaded();
-            }
+        // تحميل الصور بكسلية
+        const img = cardElement.querySelector('.sl-img') || cardElement.querySelector('.product-img');
+        if (img && !img.complete) {
+            img.addEventListener('load', () => this.imageLoaded());
+            img.addEventListener('error', () => this.imageLoaded());
+        } else if (img) {
+            this.imageLoaded();
         }
         return card;
     }
@@ -255,17 +282,19 @@ export class ProductsGrid {
         if (newQty === 0) delete cartMap[productName];
         else cartMap[productName] = newQty;
         this.saveCartMap(cartMap);
-
-        let total = 0, totalQty = 0;
-        for (let cardObj of this.cards) {
+        
+        // حساب الإجماليات بتمريرة واحدة
+        let totalQty = 0;
+        let totalPrice = 0;
+        for (const cardObj of this.cards) {
             const qty = cardObj.card.getQuantity();
             if (qty > 0) {
                 totalQty += qty;
-                total += qty * cardObj.card.getProduct().price;
+                totalPrice += qty * cardObj.card.getProduct().price;
             }
         }
         if (this.onGlobalQuantityChange) {
-            this.onGlobalQuantityChange(totalQty, total);
+            this.onGlobalQuantityChange(totalQty, totalPrice);
         }
     }
 
@@ -279,50 +308,84 @@ export class ProductsGrid {
     }
 
     setActiveMainCategory(cat) {
+        if (this.activeMain === cat) return;
         this.activeMain = cat;
         this.activeSub = null;
         this.visibleSectionsCount = 6;
+        this.searchCache.clear();   // مسح كاش البحث لأن التصنيف تغير
         this.buildAllSectionsList();
         this.resetAllPages();
         this.renderVisibleSections();
     }
 
     setActiveSubCategory(sub) {
-        this.activeSub = (sub === 'all') ? null : sub;
+        const newSub = (sub === 'all') ? null : sub;
+        if (this.activeSub === newSub) return;
+        this.activeSub = newSub;
         this.visibleSectionsCount = 6;
+        this.searchCache.clear();
         this.buildAllSectionsList();
         this.resetAllPages();
         this.renderVisibleSections();
     }
 
     filterBySearch(query) {
-        this.searchQuery = query;
-        if (query.trim() !== '') {
-            this.buildAllSectionsList();
-            this.visibleSectionsCount = this.allSectionsList.length;
-        } else {
-            this.visibleSectionsCount = 6;
-            this.buildAllSectionsList();
-        }
-        this.resetAllPages();
-        this.renderVisibleSections();
-        // Count matching products synchronously before async render queue runs
+        // Debounce لتجنب إعادة الرندر المتكررة أثناء الكتابة
+        if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
+        this.searchDebounceTimer = setTimeout(() => {
+            const trimmedQuery = query.trim();
+            this.searchQuery = trimmedQuery;
+            if (trimmedQuery !== '') {
+                // عند البحث نعرض كل الأقسام التي تحتوي على نتائج
+                this.visibleSectionsCount = this.allSectionsList.length;
+            } else {
+                this.visibleSectionsCount = 6;
+            }
+            this.searchCache.clear();  // نمسح الكاش لأن الاستعلام تغير
+            this.resetAllPages();
+            this.renderVisibleSections();
+            
+            // حساب عدد النتائج (دون إعادة فلترة كاملة)
+            if (!trimmedQuery) {
+                if (window.searchStatsCallback) window.searchStatsCallback(0);
+                return;
+            }
+            const lowerQuery = trimmedQuery.toLowerCase();
+            let count = 0;
+            for (const { mainCat, subCat } of this.allSectionsList) {
+                const key = `${mainCat}|${subCat}`;
+                const products = this.productsMap.get(key) || [];
+                // نستخدم حلقة سريعة بدون تخزين مؤقت هنا لأنها حساب بسيط
+                for (let i = 0; i < products.length; i++) {
+                    if (products[i].name.toLowerCase().includes(lowerQuery)) count++;
+                }
+            }
+            if (window.searchStatsCallback) window.searchStatsCallback(count);
+            else {
+                const statsSpan = document.getElementById('searchStats');
+                if (statsSpan) statsSpan.innerText = count ? `${count} نتيجة` : '';
+            }
+        }, CONFIG.DEBOUNCE_DELAY);
+        
+        // إرجاع عدد سريع للاستخدام الخارجي (اختياري)
         if (!query.trim()) return 0;
         const lowerQuery = query.toLowerCase();
         let count = 0;
         for (const { mainCat, subCat } of this.allSectionsList) {
             const key = `${mainCat}|${subCat}`;
             const products = this.productsMap.get(key) || [];
-            count += products.filter(p => p.name.toLowerCase().includes(lowerQuery)).length;
+            for (let i = 0; i < products.length; i++) {
+                if (products[i].name.toLowerCase().includes(lowerQuery)) count++;
+            }
         }
         return count;
     }
 
     resetAllPages() {
-        for (let key of this.currentPageMap.keys()) {
+        for (const key of this.currentPageMap.keys()) {
             this.currentPageMap.set(key, 0);
         }
-        this.loadMoreButtons.forEach(btn => btn.remove());
+        this.loadMoreButtons.forEach(btn => { if(btn && btn.remove) btn.remove(); });
         this.loadMoreButtons.clear();
     }
 
@@ -337,8 +400,12 @@ export class ProductsGrid {
         this.totalImages = 0;
         this.imagesLoaded = 0;
         this.allSectionsList = [];
-        if (this.sectionsLoadMoreBtn) this.sectionsLoadMoreBtn.remove();
-        this.sectionsLoadMoreBtn = null;
+        this.searchCache.clear();
+        if (this.sectionsLoadMoreBtn) {
+            this.sectionsLoadMoreBtn.remove();
+            this.sectionsLoadMoreBtn = null;
+        }
+        if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
     }
 
     getMainCategories() {
@@ -346,12 +413,13 @@ export class ProductsGrid {
     }
 
     getSubCategoriesFor(mainCat) {
-        return Array.from(this.subCategoriesMap.get(mainCat) || []);
+        const subs = this.subCategoriesMap.get(mainCat);
+        return subs ? Array.from(subs) : [];
     }
 
     getAllCartItems() {
         const items = [];
-        for (let cardObj of this.cards) {
+        for (const cardObj of this.cards) {
             const qty = cardObj.card.getQuantity();
             if (qty > 0) {
                 items.push({
@@ -375,11 +443,23 @@ export class ProductsGrid {
 
     getTotalCartQuantity() {
         let total = 0;
-        for (let cardObj of this.cards) total += cardObj.card.getQuantity();
+        for (const cardObj of this.cards) total += cardObj.card.getQuantity();
         return total;
     }
+
+    loadMoreSections() {
+        this.visibleSectionsCount += this.sectionsPerLoad;
+        this.renderVisibleSections();
+    }
+
+    // وظيفة مساعدة لتجنب XSS
+    escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
 }
-
-
-
-
