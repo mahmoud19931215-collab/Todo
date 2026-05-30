@@ -1,139 +1,170 @@
-// ProductCard.js
-import { CONFIG, escapeHtml, formatCurrency } from './config.js';
+// ProductsGrid.js
+import { CONFIG } from './config.js';
+import { ProductCard } from './ProductCard.js';
 
-export class ProductCard {
-    constructor(product, storageService, onCartUpdate) {
-        this.product = product;
+export class ProductsGrid {
+    constructor(containerId, storageService, onCartUpdate) {
+        this.container = document.getElementById(containerId);
         this.storageService = storageService;
-        this.onCartUpdate = onCartUpdate; // Callback للتواصل مع مدير السلة
-        this.element = null;
-        this.imageURL = null;
+        this.onCartUpdate = onCartUpdate;
+        
+        this.allProducts = [];
+        this.filteredProducts = [];
+        this.activeCards = [];
+        
+        this.currentCategory = 'all';
+        this.searchQuery = '';
+        this.currentPage = 1;
     }
 
-    render(currentQuantity = 0) {
-        const card = document.createElement('div');
-        card.className = 'product-card';
-        card.dataset.id = this.product.id || '';
-        card.dataset.name = this.product.name;
-        card.dataset.category = this.product.category;
-
-        const isAvailable = this.product.available !== false;
-        const discountBadge = this.product.discount ? `<div class="discount-badge">${this.product.discount}</div>` : '';
-
-        card.innerHTML = `
-            <div class="image-container">
-                ${discountBadge}
-                <img src="${CONFIG.IMAGE_PLACEHOLDER}" class="product-image loading" alt="${escapeHtml(this.product.name)}" loading="lazy">
-                ${!isAvailable ? '<div class="out-of-stock-overlay">غير متوفر حالياً</div>' : ''}
-            </div>
-            <div class="product-details">
-                <span class="product-category">${escapeHtml(this.product.category)}</span>
-                <h3 class="product-title">${escapeHtml(this.product.name)}</h3>
-                <p class="product-description">${escapeHtml(this.product.description || '')}</p>
-                <div class="product-footer">
-                    <span class="product-price">${formatCurrency(this.product.price)}</span>
-                    <div class="action-container">
-                        ${isAvailable ? this._getActionBarHtml(currentQuantity) : '<span class="status-unavailable">منتهي</span>'}
-                    </div>
-                </div>
-            </div>
-        `;
-
-        this.element = card;
-        this._loadImage(card.querySelector('.product-image'));
-        this._initEvents();
-
-        return card;
+    setProducts(products) {
+        this.allProducts = Array.isArray(products) ? products : [];
+        this.applyFilterAndSearch();
     }
 
-    _getActionBarHtml(quantity) {
-        if (quantity > 0) {
-            return `
-                <div class="quantity-controls active">
-                    <button class="btn-minus" aria-label="تقليل الكمية"><i class="fas fa-minus"></i></button>
-                    <span class="quantity-value">${quantity}</span>
-                    <button class="btn-plus" aria-label="زيادة الكمية"><i class="fas fa-plus"></i></button>
+    setCategory(category) {
+        this.currentCategory = category || 'all';
+        this.currentPage = 1;
+        this.applyFilterAndSearch();
+    }
+
+    setSearch(query) {
+        this.searchQuery = (query || '').toLowerCase().trim();
+        this.currentPage = 1;
+        this.applyFilterAndSearch();
+    }
+
+    applyFilterAndSearch() {
+        this.filteredProducts = this.allProducts.filter(product => {
+            const matchesCategory = this.currentCategory === 'all' || product.category === this.currentCategory;
+            const matchesSearch = !this.searchQuery || 
+                product.name.toLowerCase().includes(this.searchQuery) || 
+                (product.description && product.description.toLowerCase().includes(this.searchQuery));
+            return matchesCategory && matchesSearch;
+        });
+
+        this.render();
+    }
+
+    render(cartMap = {}) {
+        if (!this.container) return;
+
+        // تدمير الكروت السابقة لتنظيف الذاكرة بشكل سليم
+        this.activeCards.forEach(card => card.destroy());
+        this.activeCards = [];
+
+        if (this.filteredProducts.length === 0) {
+            this.container.innerHTML = `
+                <div class="empty-grid-state">
+                    <i class="fas fa-box-open"></i>
+                    <p>لم يتم العثور على منتجات مطابقة لمواصفات البحث.</p>
                 </div>
             `;
-        }
-        return `
-            <button class="btn-add-to-cart" aria-label="إضافة للسلة">
-                <i class="fas fa-shopping-cart"></i> إضافة
-            </button>
-        `;
-    }
-
-    async _loadImage(imgElement) {
-        if (!this.product.image || !this.product.image.startsWith('http')) {
-            imgElement.src = CONFIG.IMAGE_PLACEHOLDER;
-            imgElement.classList.remove('loading');
+            this._renderPagination(0);
             return;
         }
 
-        try {
-            // محاولة جلب الصورة من التخزين المحلي الآمن
-            let blob = await this.storageService.getImageBlob(this.product.image);
-            
-            if (!blob) {
-                // إذا لم تكن مخزنة، يتم جلبها من الشبكة مع مهلة زمنية
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), CONFIG.IMAGE_LOADING_TIMEOUT);
+        this.container.innerHTML = '';
+        
+        // حسابات الترقيم (Pagination) هندسياً
+        const startIndex = (this.currentPage - 1) * CONFIG.ITEMS_PER_PAGE;
+        const endIndex = Math.min(startIndex + CONFIG.ITEMS_PER_PAGE, this.filteredProducts.length);
+        const pageItems = this.filteredProducts.slice(startIndex, endIndex);
 
-                const response = await fetch(this.product.image, { signal: controller.signal });
-                clearTimeout(timeoutId);
+        const fragment = document.createDocumentFragment();
 
-                if (response.ok) {
-                    blob = await response.blob();
-                    await this.storageService.saveImageBlob(this.product.image, blob);
+        pageItems.forEach(product => {
+            const currentQty = cartMap[product.name] ? cartMap[product.name].quantity : 0;
+            const cardComponent = new ProductCard(product, this.storageService, this.onCartUpdate);
+            this.activeCards.push(cardComponent);
+            fragment.appendChild(cardComponent.render(currentQty));
+        });
+
+        this.container.appendChild(fragment);
+        this._renderPagination(this.filteredProducts.length);
+    }
+
+    _renderPagination(totalItems) {
+        let paginationContainer = document.getElementById('paginationControls');
+        
+        if (totalItems <= CONFIG.ITEMS_PER_PAGE) {
+            if (paginationContainer) paginationContainer.innerHTML = '';
+            return;
+        }
+
+        if (!paginationContainer) {
+            paginationContainer = document.createElement('div');
+            paginationContainer.id = 'paginationControls';
+            paginationContainer.className = 'pagination-container';
+            this.container.after(paginationContainer);
+        }
+
+        const totalPages = Math.ceil(totalItems / CONFIG.ITEMS_PER_PAGE);
+        let html = '';
+
+        html += `
+            <button class="pagination-btn" ${this.currentPage === 1 ? 'disabled' : ''} data-page="${this.currentPage - 1}">
+                <i class="fas fa-chevron-right"></i> السابق
+            </button>
+        `;
+
+        for (let i = 1; i <= totalPages; i++) {
+            if (i === 1 || i === totalPages || (i >= this.currentPage - 1 && i <= this.currentPage + 1)) {
+                html += `
+                    <button class="pagination-btn num-btn ${this.currentPage === i ? 'active' : ''}" data-page="${i}">
+                        ${i}
+                    </button>
+                `;
+            } else if (i === 2 || i === totalPages - 1) {
+                html += `<span class="pagination-dots">...</span>`;
+            }
+        }
+
+        html += `
+            <button class="pagination-btn" ${this.currentPage === totalPages ? 'disabled' : ''} data-page="${this.currentPage + 1}">
+                التالي <i class="fas fa-chevron-left"></i>
+            </button>
+        `;
+
+        paginationContainer.innerHTML = html;
+
+        // ميكانيكية التنقل الآمنة لمنع تعليق المتصفح
+        paginationContainer.onclick = (e) => {
+            const btn = e.target.closest('.pagination-btn');
+            if (btn && !btn.hasAttribute('disabled')) {
+                const targetPage = parseInt(btn.dataset.page, 10);
+                if (targetPage && targetPage !== this.currentPage) {
+                    this.currentPage = targetPage;
+                    const savedCart = this.storageService.loadCart();
+                    this.render(savedCart);
+                    window.scrollTo({ top: this.container.offsetTop - 100, behavior: 'smooth' });
                 }
             }
-
-            if (blob) {
-                this.imageURL = URL.createObjectURL(blob);
-                this.storageService.registerObjectURL(this.imageURL);
-                imgElement.src = this.imageURL;
-            } else {
-                imgElement.src = CONFIG.IMAGE_PLACEHOLDER;
-            }
-        } catch (error) {
-            console.warn(`[ProductCard] Failed to load image for ${this.product.name}`, error);
-            imgElement.src = CONFIG.IMAGE_PLACEHOLDER;
-        } finally {
-            imgElement.classList.remove('loading');
-        }
+        };
     }
 
-    _initEvents() {
-        if (!this.element) return;
-
-        this.element.addEventListener('click', (e) => {
-            const addToCartBtn = e.target.closest('.btn-add-to-cart');
-            const plusBtn = e.target.closest('.btn-plus');
-            const minusBtn = e.target.closest('.btn-minus');
-
-            if (addToCartBtn) {
-                this._updateQuantity(1);
-            } else if (plusBtn) {
-                this._updateQuantity(1);
-            } else if (minusBtn) {
-                this._updateQuantity(-1);
-            }
-        });
-    }
-
-    _updateQuantity(change) {
-        if (this.onCartUpdate) {
-            this.onCartUpdate(this.product, change);
+    renderSkeletons() {
+        if (!this.container) return;
+        this.container.innerHTML = '';
+        const fragment = document.createDocumentFragment();
+        
+        for (let i = 0; i < CONFIG.ITEMS_PER_PAGE; i++) {
+            const skeleton = document.createElement('div');
+            skeleton.className = 'product-card skeleton-card';
+            skeleton.innerHTML = `
+                <div class="image-container skeleton"></div>
+                <div class="product-details">
+                    <div class="skeleton skeleton-text line-sm"></div>
+                    <div class="skeleton skeleton-text line-md"></div>
+                    <div class="skeleton skeleton-text line-lg"></div>
+                    <div class="product-footer">
+                        <div class="skeleton skeleton-text line-price"></div>
+                        <div class="skeleton skeleton-btn"></div>
+                    </div>
+                </div>
+            `;
+            fragment.appendChild(skeleton);
         }
-    }
-
-    // تدمير آمن للمكون لفك الارتباطات ومنع تسريب الذاكرة
-    destroy() {
-        if (this.imageURL) {
-            this.storageService.revokeObjectURL(this.imageURL);
-        }
-        if (this.element) {
-            this.element.remove();
-        }
+        this.container.appendChild(fragment);
     }
 }
