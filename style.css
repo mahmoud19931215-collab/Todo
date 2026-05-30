@@ -430,100 +430,119 @@ body {
     background: linear-gradient(135deg, #f0faf5, #e8f7f0);
 }
 
-/* أزرار السهام */
-.slider-arrow {
+/* إلغاء border-radius الداخلية لأن الغلاف يتكفل بها */
+.product-img-wrapper .product-img {
+    border-radius: 0;
+    will-change: transform, opacity;
+}
+
+/* ===== Zones اللمس — نصفي الصورة قابلين للكبس ===== */
+.slider-zone {
+    position: absolute;
+    top: 0;
+    width: 42%;
+    height: 100%;
+    z-index: 4;
+    cursor: pointer;
+    /* تأثير بصري خفيف عند الكبس */
+    -webkit-tap-highlight-color: transparent;
+}
+.zone-prev { right: 0; }   /* النصف الأيمن → الصورة السابقة (RTL) */
+.zone-next { left: 0; }    /* النصف الأيسر → الصورة التالية (RTL) */
+
+/* مؤشر سهم شفاف يظهر عند الكبس فقط */
+.slider-zone::after {
+    content: '';
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    background: rgba(255,255,255,0.82);
-    backdrop-filter: blur(6px);
-    border: none;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
-    width: 30px;
-    height: 30px;
-    font-size: 20px;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    z-index: 5;
-    color: var(--text-dark);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.14);
-    transition: background 0.18s, transform 0.15s;
-    padding: 0;
-    opacity: 0;
-    pointer-events: none;
+    background: rgba(255,255,255,0);
+    transition: background 0.15s;
 }
-.product-img-wrapper.has-slider:hover .slider-arrow,
-.product-img-wrapper.has-slider:focus-within .slider-arrow {
-    opacity: 1;
-    pointer-events: auto;
-}
-/* على الموبايل: إظهارها دائماً */
-@media (max-width: 640px) {
-    .slider-arrow {
-        opacity: 1 !important;
-        pointer-events: auto !important;
-        width: 26px;
-        height: 26px;
-        font-size: 17px;
-    }
-}
-.slider-prev { right: 6px; }
-.slider-next { left: 6px; }
-.slider-arrow:hover {
-    background: var(--primary);
-    color: white;
-    transform: translateY(-50%) scale(1.1);
-}
-.slider-arrow:active { transform: translateY(-50%) scale(0.93); }
+.zone-prev::after { right: 8px; }
+.zone-next::after { left: 8px; }
 
-[data-theme="dark"] .slider-arrow {
-    background: rgba(30,40,55,0.85);
-    color: var(--text-dark);
+.slider-zone:active::after {
+    background: rgba(255,255,255,0.35);
 }
 
-/* نقاط التنقل */
+/* سهم صغير داخل الـ zone — يظهر دائماً لكن شفاف */
+.slider-zone::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 2px solid rgba(255,255,255,0);
+    border-radius: 2px;
+    width: 9px;
+    height: 9px;
+    transition: border-color 0.15s;
+}
+.zone-prev::before {
+    right: 14px;
+    border-top-color: rgba(255,255,255,0.7);
+    border-right-color: rgba(255,255,255,0.7);
+    transform: translateY(-50%) rotate(45deg);
+}
+.zone-next::before {
+    left: 14px;
+    border-top-color: rgba(255,255,255,0.7);
+    border-left-color: rgba(255,255,255,0.7);
+    transform: translateY(-50%) rotate(-45deg);
+}
+/* إخفاء السهم لو صورة واحدة */
+.product-img-wrapper:not(.has-slider) .slider-zone { display: none; }
+
+/* ===== نقاط التنقل ===== */
 .slider-dots {
     position: absolute;
-    bottom: 7px;
+    bottom: 8px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
     gap: 5px;
-    z-index: 5;
+    z-index: 6;
+    pointer-events: none; /* لا تتداخل مع الـ zones */
 }
 .slider-dot {
-    width: 7px;
-    height: 7px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
-    background: rgba(255,255,255,0.55);
-    border: 1.5px solid rgba(255,255,255,0.7);
+    background: rgba(255,255,255,0.5);
+    border: 1.5px solid rgba(255,255,255,0.8);
     cursor: pointer;
-    transition: background 0.2s, transform 0.2s, width 0.2s;
+    pointer-events: auto;
+    transition: background 0.18s, width 0.18s, border-radius 0.18s;
     flex-shrink: 0;
 }
 .slider-dot.active {
     background: var(--primary);
     border-color: var(--primary);
-    width: 18px;
-    border-radius: 4px;
-    transform: scaleY(1.05);
+    width: 16px;
+    border-radius: 3px;
 }
 
-/* تأثير انتقال الصورة */
-.product-img.slide-fade {
-    animation: slideFade 0.28s ease;
+/* ===== عداد الصور (1/3) ===== */
+.slider-counter {
+    position: absolute;
+    top: 7px;
+    left: 8px;
+    background: rgba(0,0,0,0.38);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 20px;
+    z-index: 6;
+    letter-spacing: 0.5px;
+    pointer-events: none;
+    line-height: 1.6;
 }
-@keyframes slideFade {
-    0% { opacity: 0.45; transform: scale(0.97); }
-    100% { opacity: 1; transform: scale(1); }
-}
-
-/* إزالة border-radius المكرر من img لأن الغلاف يتكفل بها */
-.product-img-wrapper .product-img {
-    border-radius: 0;
+[data-theme="dark"] .slider-counter {
+    background: rgba(0,0,0,0.55);
 }
 
 /* تفاصيل المنتج */
