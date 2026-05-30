@@ -18,8 +18,11 @@ export class CartManager {
         this.whatsappFooterBtn = document.getElementById('whatsappFooterBtn');
         this.drawerWhatsappBtn = document.getElementById('drawerWhatsappBtn');
         
+        // إصلاح: تخزين مراجع أزرار الإغلاق
+        this.closeDrawerBtns = document.querySelectorAll('.drawer-close');
+        
         // حالة السلة
-        this.items = [];           // { name, quantity, price }
+        this.items = [];
         this.totalQuantity = 0;
         this.totalPrice = 0;
         
@@ -29,13 +32,12 @@ export class CartManager {
         // منع التحديث المتكرر للـ drawer أثناء فتحه
         this.drawerUpdateQueued = false;
         
-        // ربط الأحداث (مع إمكانية إلغاء الربط لاحقاً)
+        // ربط الأحداث
         this.boundEvents = new Map();
         this.init();
     }
 
     init() {
-        // دالة مساعدة لربط الأحداث مع تخزينها
         const addEvent = (element, event, handler) => {
             if (!element) return;
             element.addEventListener(event, handler);
@@ -45,9 +47,13 @@ export class CartManager {
         
         addEvent(this.openDrawerBtn, 'click', () => this.openDrawer());
         
+        // إصلاح: ربط أزرار الإغلاق بشكل صحيح
         if (this.closeDrawerBtns) {
-            document.querySelectorAll('.drawer-close').forEach(btn => {
-                addEvent(btn, 'click', () => this.closeDrawer());
+            this.closeDrawerBtns.forEach(btn => {
+                addEvent(btn, 'click', (e) => {
+                    e.stopPropagation();
+                    this.closeDrawer();
+                });
             });
         }
         
@@ -58,7 +64,6 @@ export class CartManager {
             this.closeDrawer();
         });
         
-        // استخدام delegation لإزالة العناصر (كفاءة أعلى)
         if (this.cartItemsList) {
             addEvent(this.cartItemsList, 'click', (e) => {
                 const btn = e.target.closest('.remove-item');
@@ -73,7 +78,7 @@ export class CartManager {
     openDrawer() {
         if (this.cartDrawer) this.cartDrawer.classList.add('open');
         if (this.drawerOverlay) this.drawerOverlay.classList.add('open');
-        this.updateDrawerContent();  // تحديث المحتوى عند الفتح فقط
+        this.updateDrawerContent();
     }
 
     closeDrawer() {
@@ -82,7 +87,6 @@ export class CartManager {
     }
 
     updateFromCartItems(cartItems) {
-        // تحديث المصفوفة وحساب الإجماليات بتمريرة واحدة
         this.items = cartItems;
         let newTotalQuantity = 0;
         let newTotalPrice = 0;
@@ -95,7 +99,6 @@ export class CartManager {
         this.totalQuantity = newTotalQuantity;
         this.totalPrice = newTotalPrice;
         
-        // تحديث الشارة والفوتر العائم
         if (this.cartBadge) {
             this.cartBadge.innerText = this.totalQuantity;
             this.cartBadge.style.display = this.totalQuantity > 0 ? 'flex' : 'none';
@@ -110,7 +113,6 @@ export class CartManager {
             this.grandTotalSpan.innerText = this.totalPrice.toLocaleString();
         }
         
-        // تحديث محتوى الدراور إذا كان مفتوحاً (باستخدام طابور لتجنب التكرار)
         if (this.cartDrawer && this.cartDrawer.classList.contains('open') && !this.drawerUpdateQueued) {
             this.drawerUpdateQueued = true;
             requestAnimationFrame(() => {
@@ -133,7 +135,6 @@ export class CartManager {
             return;
         }
         
-        // استخدام DocumentFragment لبناء القائمة دفعة واحدة
         const fragment = document.createDocumentFragment();
         const len = this.items.length;
         for (let i = 0; i < len; i++) {
@@ -171,7 +172,6 @@ export class CartManager {
             fragment.appendChild(div);
         }
         
-        // تنظيف وإضافة المحتوى الجديد
         this.cartItemsList.innerHTML = '';
         this.cartItemsList.appendChild(fragment);
         
@@ -190,7 +190,6 @@ export class CartManager {
             return;
         }
         
-        // بناء الرسالة بفعالية باستخدام مصفوفة ثم join
         const lines = [];
         const len = this.items.length;
         for (let i = 0; i < len; i++) {
@@ -205,7 +204,6 @@ export class CartManager {
         window.open(`https://wa.me/${this.targetNumber}?text=${encodeURIComponent(message)}`, '_blank');
     }
     
-    // دالة اختيارية لتنظيف الأحداث (إذا أردت تدمير المدير)
     destroy() {
         for (const [element, events] of this.boundEvents.entries()) {
             for (const { event, handler } of events) {
