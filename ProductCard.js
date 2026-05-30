@@ -12,9 +12,34 @@ export class ProductCard {
         this.subtotalRow = null;
         this.debounceTimer = null;
         this.imageElement = null;
+        // --- Slider state ---
+        this.currentSlide = 0;
+        this.images = [];
+    }
+
+    /** جمع كل روابط الصور المتاحة للمنتج */
+    _collectImages() {
+        const imgs = [];
+        // دعم أنواع مختلفة من هيكل البيانات
+        if (Array.isArray(this.product.images)) {
+            this.product.images.forEach(url => { if (url) imgs.push(url); });
+        } else {
+            // الصور الثلاث: imageUrl, imageUrl2, imageUrl3 أو image_left/image_right
+            const candidates = [
+                this.product.imageUrl,
+                this.product.imageUrl2 || this.product.image_right,
+                this.product.imageUrl3 || this.product.image_left,
+            ];
+            candidates.forEach(url => { if (url) imgs.push(url); });
+        }
+        // تصفية الروابط غير الصالحة
+        return imgs.filter(url => url && url.startsWith('http'));
     }
 
     render() {
+        this.images = this._collectImages();
+        const hasMultiple = this.images.length > 1;
+
         const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
         const card = document.createElement('div');
         card.className = 'product-card';
@@ -26,11 +51,26 @@ export class ProductCard {
             ? `<div class="item-subtotal">المجموع: <span class="subtotal-val">${(this.quantity * this.product.price).toLocaleString()}</span> ل.س</div>`
             : `<div class="item-subtotal" style="display: none;">المجموع: <span class="subtotal-val">0</span> ل.س</div>`;
 
+        const sliderDotsHtml = hasMultiple
+            ? `<div class="slider-dots">
+                ${this.images.map((_, i) => `<span class="slider-dot${i === 0 ? ' active' : ''}" data-index="${i}"></span>`).join('')}
+               </div>`
+            : '';
+
+        const sliderArrowsHtml = hasMultiple
+            ? `<button class="slider-arrow slider-prev" aria-label="السابق">&#8250;</button>
+               <button class="slider-arrow slider-next" aria-label="التالي">&#8249;</button>`
+            : '';
+
         card.innerHTML = `
-            <img class="product-img" id="${uniqueId}" 
-                 src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Crect width='200' height='200' fill='%23f0f0f0'/%3E%3Ctext x='100' y='110' text-anchor='middle' fill='%23999' font-size='14'%3Eتحميل...%3C/text%3E%3C/svg%3E" 
-                 alt="${escapeHtml(this.product.name)}"
-                 loading="lazy">
+            <div class="product-img-wrapper${hasMultiple ? ' has-slider' : ''}">
+                <img class="product-img" id="${uniqueId}" 
+                     src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Crect width='200' height='200' fill='%23f0f0f0'/%3E%3Ctext x='100' y='110' text-anchor='middle' fill='%23999' font-size='14'%3Eتحميل...%3C/text%3E%3C/svg%3E" 
+                     alt="${escapeHtml(this.product.name)}"
+                     loading="lazy">
+                ${sliderArrowsHtml}
+                ${sliderDotsHtml}
+            </div>
             <div class="product-info">
                 <div class="product-name">${escapeHtml(this.product.name)}</div>
                 <div class="product-price">${this.product.price.toLocaleString()} ل.س</div>
@@ -51,7 +91,7 @@ export class ProductCard {
 
         const incBtn = card.querySelector('.inc-qty');
         const decBtn = card.querySelector('.dec-qty');
-        
+
         incBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             this.changeQuantity(1);
@@ -77,49 +117,121 @@ export class ProductCard {
             this.qtyInput.value = this.quantity;
         });
 
+        // أحداث السلايدر
+        if (hasMultiple) {
+            // أزرار السهام
+            const prevBtn = card.querySelector('.slider-prev');
+            const nextBtn = card.querySelector('.slider-next');
+            if (prevBtn) prevBtn.addEventListener('click', (e) => { e.stopPropagation(); this.prevSlide(); });
+            if (nextBtn) nextBtn.addEventListener('click', (e) => { e.stopPropagation(); this.nextSlide(); });
+
+            // النقاط
+            card.querySelectorAll('.slider-dot').forEach(dot => {
+                dot.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.goToSlide(parseInt(dot.getAttribute('data-index')));
+                });
+            });
+
+            // السحب باللمس (swipe)
+            this._initTouchSwipe(card.querySelector('.product-img-wrapper'));
+        }
+
         this.loadImage();
         this.updateUI();
         return card;
     }
 
+    /** تهيئة السحب باللمس */
+    _initTouchSwipe(wrapper) {
+        if (!wrapper) return;
+        let startX = 0;
+        let isDragging = false;
+        wrapper.addEventListener('touchstart', (e) => {
+            startX = e.touches[0].clientX;
+            isDragging = true;
+        }, { passive: true });
+        wrapper.addEventListener('touchend', (e) => {
+            if (!isDragging) return;
+            isDragging = false;
+            const diff = startX - e.changedTouches[0].clientX;
+            if (Math.abs(diff) > 40) {
+                // في RTL: السحب يميناً = الصورة التالية
+                diff > 0 ? this.nextSlide() : this.prevSlide();
+            }
+        }, { passive: true });
+    }
+
+    goToSlide(index) {
+        if (!this.element || this.images.length <= 1) return;
+        this.currentSlide = (index + this.images.length) % this.images.length;
+        this._updateSliderUI();
+        this._loadSlideImage(this.currentSlide);
+    }
+
+    nextSlide() { this.goToSlide(this.currentSlide + 1); }
+    prevSlide() { this.goToSlide(this.currentSlide - 1); }
+
+    _updateSliderUI() {
+        if (!this.element) return;
+        // تحديث النقاط
+        this.element.querySelectorAll('.slider-dot').forEach((dot, i) => {
+            dot.classList.toggle('active', i === this.currentSlide);
+        });
+        // تأثير الانتقال على الصورة
+        if (this.imageElement) {
+            this.imageElement.classList.add('slide-fade');
+            setTimeout(() => this.imageElement && this.imageElement.classList.remove('slide-fade'), 280);
+        }
+    }
+
+    async _loadSlideImage(index) {
+        if (!this.imageElement || !this.images[index]) return;
+        const url = this.images[index];
+        // تحقق من الكاش أولاً
+        let blob = null;
+        try { blob = await this.storage.getImageBlob(url); } catch (e) {}
+        if (blob) {
+            const objUrl = URL.createObjectURL(blob);
+            this.imageElement.src = objUrl;
+            this.imageElement.onload = () => URL.revokeObjectURL(objUrl);
+            this.imageElement.onerror = () => { URL.revokeObjectURL(objUrl); this.imageElement.src = url; };
+        } else {
+            this.imageElement.src = url;
+            this.imageElement.onerror = () => this.setPlaceholderImage();
+            // تخزين في الخلفية
+            fetch(url, { mode: 'cors' }).then(r => r.blob()).then(b => this.storage.saveImageBlob(url, b)).catch(() => {});
+        }
+    }
+
     async loadImage() {
         if (!this.imageElement) return;
-        const imageUrl = this.product.imageUrl;
-        if (!imageUrl) {
-            this.setPlaceholderImage();
-            return;
+        // تحميل الصورة الأولى (الرئيسية)
+        if (this.images.length === 0) { this.setPlaceholderImage(); return; }
+        await this._loadSlideImage(0);
+        // تحميل باقي الصور مسبقاً في الخلفية
+        for (let i = 1; i < this.images.length; i++) {
+            this._preloadImage(this.images[i]);
         }
+    }
 
-        // محاولة الحصول من الكاش
-        let cachedBlob = null;
+    async _preloadImage(url) {
+        if (!url) return;
         try {
-            cachedBlob = await this.storage.getImageBlob(imageUrl);
-        } catch (e) {
-            console.warn("Error getting cached blob", e);
-        }
-
-        if (cachedBlob) {
-            const url = URL.createObjectURL(cachedBlob);
-            this.imageElement.src = url;
-            this.imageElement.onload = () => URL.revokeObjectURL(url);
-            this.imageElement.onerror = () => {
-                URL.revokeObjectURL(url);
-                this.loadImageDirect();
-            };
-            return;
-        }
-
-        // تحميل مباشر مع تخزين
-        this.loadImageDirect();
+            const cached = await this.storage.getImageBlob(url);
+            if (!cached) {
+                const res = await fetch(url, { mode: 'cors' });
+                if (res.ok) {
+                    const blob = await res.blob();
+                    await this.storage.saveImageBlob(url, blob);
+                }
+            }
+        } catch (e) {}
     }
 
     async loadImageDirect() {
-        const imageUrl = this.product.imageUrl;
-        if (!imageUrl) {
-            this.setPlaceholderImage();
-            return;
-        }
-
+        const imageUrl = this.images[0];
+        if (!imageUrl) { this.setPlaceholderImage(); return; }
         try {
             const res = await fetch(imageUrl, { mode: 'cors' });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -128,16 +240,10 @@ export class ProductCard {
             const url = URL.createObjectURL(blob);
             this.imageElement.src = url;
             this.imageElement.onload = () => URL.revokeObjectURL(url);
-            this.imageElement.onerror = () => {
-                URL.revokeObjectURL(url);
-                this.setPlaceholderImage();
-            };
+            this.imageElement.onerror = () => { URL.revokeObjectURL(url); this.setPlaceholderImage(); };
         } catch (err) {
-            console.warn(`فشل تحميل الصورة: ${imageUrl}`, err);
             this.imageElement.src = imageUrl;
-            this.imageElement.onerror = () => {
-                this.setPlaceholderImage();
-            };
+            this.imageElement.onerror = () => this.setPlaceholderImage();
         }
     }
 
@@ -176,9 +282,7 @@ export class ProductCard {
         }, 150);
     }
 
-    getQuantity() {
-        return this.quantity;
-    }
+    getQuantity() { return this.quantity; }
 
     setQuantity(qty) {
         const newQty = Math.min(this.product.stock || 999, Math.max(0, qty));
@@ -190,10 +294,5 @@ export class ProductCard {
         }
     }
 
-    getProduct() {
-        return this.product;
-    }
+    getProduct() { return this.product; }
 }
-
-
-
