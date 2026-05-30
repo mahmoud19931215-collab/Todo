@@ -406,144 +406,165 @@ body {
     transform: translateY(-2px) scale(0.99);
 }
 
-/* صورة المنتج */
+/* ════════════════════════════════════════════
+   SLIDER  —  نظام track أفقي نظيف
+   كل الصور مرصوفة، نحرك الـ track بـ transform
+   ════════════════════════════════════════════ */
+
+/* صورة منتج بدون slider (صورة واحدة) */
 .product-img {
     width: 100%;
     aspect-ratio: 1 / 1;
     object-fit: cover;
-    background: linear-gradient(135deg, #f0faf5, #e8f7f0);
     display: block;
-    transition: transform 0.35s ease;
     border-radius: var(--radius-card) var(--radius-card) 0 0;
-    position: relative;
-    z-index: 1;
+    background: linear-gradient(135deg, #f0faf5, #e8f7f0);
+    transition: transform 0.3s ease;
 }
-.product-card:hover .product-img {
-    transform: scale(1.02);
-}
+.product-card:hover .product-img { transform: scale(1.03); }
 
-/* ===== غلاف الصورة مع السلايدر ===== */
-.product-img-wrapper {
+/* ── الغلاف ── */
+.sl-wrap {
     position: relative;
     overflow: hidden;
     border-radius: var(--radius-card) var(--radius-card) 0 0;
     background: linear-gradient(135deg, #f0faf5, #e8f7f0);
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: pan-y;   /* نسمح بالـ scroll العمودي لكن نتحكم بالأفقي */
+}
+[data-theme="dark"] .sl-wrap {
+    background: linear-gradient(135deg, #1a2535, #131c2a);
 }
 
-/* إلغاء border-radius الداخلية لأن الغلاف يتكفل بها */
-.product-img-wrapper .product-img {
-    border-radius: 0;
-    will-change: transform, opacity;
+/* ── track ── */
+.sl-track {
+    display: flex;
+    flex-direction: row;   /* LTR داخلياً — نتحكم بالترتيب عبر الـ JS */
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform;
+}
+/* بدون انيميشن أثناء السحب */
+.sl-track.dragging { transition: none; }
+
+/* ── slide ── */
+.sl-slide {
+    flex-shrink: 0;
+    /* العرض يضبطه JS inline */
 }
 
-/* ===== Zones اللمس — نصفي الصورة قابلين للكبس ===== */
-.slider-zone {
+/* ── الصورة داخل الـ slide ── */
+.sl-img {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    display: block;
+    pointer-events: none;
+    -webkit-user-drag: none;
+    background: linear-gradient(135deg, #f0faf5, #e8f7f0);
+}
+[data-theme="dark"] .sl-img {
+    background: linear-gradient(135deg, #1a2535, #131c2a);
+}
+
+/* ── zones اليمين/اليسار — مناطق كبس واسعة ── */
+.sl-zone {
     position: absolute;
     top: 0;
-    width: 42%;
+    width: 36%;
     height: 100%;
     z-index: 4;
     cursor: pointer;
-    /* تأثير بصري خفيف عند الكبس */
     -webkit-tap-highlight-color: transparent;
+    display: flex;
+    align-items: center;
 }
-.zone-prev { right: 0; }   /* النصف الأيمن → الصورة السابقة (RTL) */
-.zone-next { left: 0; }    /* النصف الأيسر → الصورة التالية (RTL) */
+.sl-zr { right: 0; justify-content: flex-end; padding-right: 10px; }
+.sl-zl { left:  0; justify-content: flex-start; padding-left: 10px; }
 
-/* مؤشر سهم شفاف يظهر عند الكبس فقط */
-.slider-zone::after {
+/* السهم — دائرة شفافة مع أيقونة chevron */
+.sl-zone::before {
     content: '';
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 28px;
-    height: 28px;
+    display: block;
+    width: 30px;
+    height: 30px;
     border-radius: 50%;
-    background: rgba(255,255,255,0);
-    transition: background 0.15s;
+    background: rgba(0,0,0,0.22);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.18);
+    transition: background 0.15s, transform 0.12s;
+    flex-shrink: 0;
 }
-.zone-prev::after { right: 8px; }
-.zone-next::after { left: 8px; }
-
-.slider-zone:active::after {
-    background: rgba(255,255,255,0.35);
-}
-
-/* سهم صغير داخل الـ zone — يظهر دائماً لكن شفاف */
-.slider-zone::before {
+/* السهم داخل الدائرة */
+.sl-zone::after {
     content: '';
     position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    border: 2px solid rgba(255,255,255,0);
-    border-radius: 2px;
-    width: 9px;
-    height: 9px;
-    transition: border-color 0.15s;
+    width: 9px; height: 9px;
+    border-top:   2px solid rgba(255,255,255,0.9);
+    border-right: 2px solid rgba(255,255,255,0.9);
+    pointer-events: none;
 }
-.zone-prev::before {
-    right: 14px;
-    border-top-color: rgba(255,255,255,0.7);
-    border-right-color: rgba(255,255,255,0.7);
-    transform: translateY(-50%) rotate(45deg);
+.sl-zr::after {
+    right: 19px;
+    transform: rotate(45deg);
 }
-.zone-next::before {
-    left: 14px;
-    border-top-color: rgba(255,255,255,0.7);
-    border-left-color: rgba(255,255,255,0.7);
-    transform: translateY(-50%) rotate(-45deg);
+.sl-zl::after {
+    left: 19px;
+    transform: rotate(-135deg);
 }
-/* إخفاء السهم لو صورة واحدة */
-.product-img-wrapper:not(.has-slider) .slider-zone { display: none; }
 
-/* ===== نقاط التنقل ===== */
-.slider-dots {
+/* كبسة */
+.sl-zone:active::before {
+    background: rgba(255,255,255,0.35);
+    transform: scale(0.88);
+}
+
+/* ── نقاط ── */
+.sl-dots {
     position: absolute;
-    bottom: 8px;
+    bottom: 9px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
     gap: 5px;
     z-index: 6;
-    pointer-events: none; /* لا تتداخل مع الـ zones */
+    pointer-events: none;
 }
-.slider-dot {
-    width: 6px;
-    height: 6px;
+.sl-dot {
+    width: 7px; height: 7px;
     border-radius: 50%;
-    background: rgba(255,255,255,0.5);
-    border: 1.5px solid rgba(255,255,255,0.8);
+    background: rgba(255,255,255,0.45);
+    border: 1.5px solid rgba(255,255,255,0.88);
     cursor: pointer;
     pointer-events: auto;
-    transition: background 0.18s, width 0.18s, border-radius 0.18s;
+    transition: width 0.2s ease, background 0.2s ease, border-radius 0.2s ease;
     flex-shrink: 0;
 }
-.slider-dot.active {
+.sl-dot.on {
     background: var(--primary);
     border-color: var(--primary);
-    width: 16px;
-    border-radius: 3px;
+    width: 18px;
+    border-radius: 4px;
 }
 
-/* ===== عداد الصور (1/3) ===== */
-.slider-counter {
+/* ── عداد 1/3 ── */
+.sl-ctr {
     position: absolute;
-    top: 7px;
+    top: 8px;
     left: 8px;
-    background: rgba(0,0,0,0.38);
+    background: rgba(0,0,0,0.32);
     color: #fff;
     font-size: 11px;
-    font-weight: 700;
-    padding: 2px 7px;
+    font-weight: 600;
+    padding: 2px 8px;
     border-radius: 20px;
     z-index: 6;
-    letter-spacing: 0.5px;
     pointer-events: none;
     line-height: 1.6;
+    letter-spacing: 0.3px;
 }
-[data-theme="dark"] .slider-counter {
-    background: rgba(0,0,0,0.55);
-}
+[data-theme="dark"] .sl-ctr { background: rgba(0,0,0,0.5); }
 
 /* تفاصيل المنتج */
 .product-info {
@@ -1035,12 +1056,12 @@ body {
     .skeleton-grid {
         grid-template-columns: 1fr;
     }
-    /* تكبير الصورة قليلاً وجعلها تتنفس */
-    .product-img-wrapper {
-        border-radius: var(--radius-card) var(--radius-card) 0 0;
+    /* تكبير مناطق اللمس على الموبايل */
+    .sl-zone {
+        width: 44%;
     }
-    .product-img {
-        border-radius: 0;
+    .sl-zone::before {
+        width: 28px; height: 28px;
     }
     /* توسيع أزرار التحكم لسهولة اللمس */
     .qty-btn {
