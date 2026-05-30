@@ -1,75 +1,60 @@
 // CartManager.js
-import { escapeHtml } from './config.js';
+import { escapeHtml, formatCurrency } from './config.js';
 
 export class CartManager {
-    constructor(targetNumber, onCartUpdate) {
+    constructor(targetNumber, storageService, onCartChangeCallback) {
         this.targetNumber = targetNumber;
-        this.onCartUpdate = onCartUpdate;
-        
-        // العناصر الأساسية - تخزين المراجع
+        this.storageService = storageService;
+        this.onCartChangeCallback = onCartChangeCallback; // تحديث واجهة الـ Grid تلقائياً عند تغيير الكميات داخل السلة
+
+        // ربط عناصر DOM
         this.cartDrawer = document.getElementById('cartDrawer');
-        this.drawerOverlay = document.getElementById('cartOverlay');
+        this.cartOverlay = document.getElementById('cartOverlay');
         this.cartBadge = document.getElementById('cartBadge');
-        this.cartFooter = document.getElementById('cartFooter');
-        this.grandTotalSpan = document.getElementById('grandTotal');
         this.cartItemsList = document.getElementById('cartItemsList');
         this.drawerTotalSpan = document.getElementById('drawerTotal');
         this.openDrawerBtn = document.getElementById('cartDrawerBtn');
-        this.whatsappFooterBtn = document.getElementById('whatsappFooterBtn');
-        this.drawerWhatsappBtn = document.getElementById('drawerWhatsappBtn');
-        
-        // إصلاح: تخزين مراجع أزرار الإغلاق
-        this.closeDrawerBtns = document.querySelectorAll('.drawer-close');
-        
-        // حالة السلة
-        this.items = [];
-        this.totalQuantity = 0;
-        this.totalPrice = 0;
-        
-        // معاودة الاتصال لإزالة عنصر
-        this.onRemoveItemCallback = null;
-        
-        // منع التحديث المتكرر للـ drawer أثناء فتحه
-        this.drawerUpdateQueued = false;
-        
-        // ربط الأحداث
-        this.boundEvents = new Map();
+        this.closeDrawerBtn = document.getElementById('cartCloseBtn');
+        this.whatsappBtn = document.getElementById('cartWhatsappBtn');
+
+        // مخزن البيانات الداخلي الموحد (تمثيل السلة)
+        this.cartMap = this.storageService.loadCart();
+
         this.init();
     }
 
     init() {
-        const addEvent = (element, event, handler) => {
-            if (!element) return;
-            element.addEventListener(event, handler);
-            if (!this.boundEvents.has(element)) this.boundEvents.set(element, []);
-            this.boundEvents.get(element).push({ event, handler });
-        };
-        
-        addEvent(this.openDrawerBtn, 'click', () => this.openDrawer());
-        
-        // إصلاح: ربط أزرار الإغلاق بشكل صحيح
-        if (this.closeDrawerBtns) {
-            this.closeDrawerBtns.forEach(btn => {
-                addEvent(btn, 'click', (e) => {
-                    e.stopPropagation();
-                    this.closeDrawer();
-                });
-            });
+        this._bindEvents();
+        this.updateUI();
+    }
+
+    _bindEvents() {
+        if (this.openDrawerBtn) {
+            this.openDrawerBtn.addEventListener('click', () => this.openDrawer());
         }
-        
-        addEvent(this.drawerOverlay, 'click', () => this.closeDrawer());
-        addEvent(this.whatsappFooterBtn, 'click', () => this.sendToWhatsApp());
-        addEvent(this.drawerWhatsappBtn, 'click', () => {
-            this.sendToWhatsApp();
-            this.closeDrawer();
-        });
-        
+        if (this.closeDrawerBtn) {
+            this.closeDrawerBtn.addEventListener('click', () => this.closeDrawer());
+        }
+        if (this.cartOverlay) {
+            this.cartOverlay.addEventListener('click', () => this.closeDrawer());
+        }
+        if (this.whatsappBtn) {
+            this.whatsappBtn.addEventListener('click', () => this.sendToWhatsApp());
+        }
+
+        // تفويض الأحداث (Event Delegation) لأزرار الزيادة والنقصان والحذف داخل الـ Drawer نفسه
         if (this.cartItemsList) {
-            addEvent(this.cartItemsList, 'click', (e) => {
-                const btn = e.target.closest('.remove-item');
-                if (btn && this.onRemoveItemCallback) {
-                    const name = btn.getAttribute('data-name');
-                    if (name) this.onRemoveItemCallback(name);
+            this.cartItemsList.addEventListener('click', (e) => {
+                const row = e.target.closest('.cart-item-row');
+                if (!row) return;
+                const name = row.dataset.name;
+
+                if (e.target.closest('.btn-drawer-plus')) {
+                    this.updateItemQuantity(name, 1);
+                } else if (e.target.closest('.btn-drawer-minus')) {
+                    this.updateItemQuantity(name, -1);
+                } else if (e.target.closest('.btn-drawer-remove')) {
+                    this.removeItem(name);
                 }
             });
         }
@@ -77,141 +62,151 @@ export class CartManager {
 
     openDrawer() {
         if (this.cartDrawer) this.cartDrawer.classList.add('open');
-        if (this.drawerOverlay) this.drawerOverlay.classList.add('open');
-        this.updateDrawerContent();
+        if (this.cartOverlay) this.cartOverlay.classList.add('active');
+        this.renderDrawerItems();
     }
 
     closeDrawer() {
         if (this.cartDrawer) this.cartDrawer.classList.remove('open');
-        if (this.drawerOverlay) this.drawerOverlay.classList.remove('open');
+        if (this.cartOverlay) this.cartOverlay.classList.remove('active');
     }
 
-    updateFromCartItems(cartItems) {
-        this.items = cartItems;
-        let newTotalQuantity = 0;
-        let newTotalPrice = 0;
-        const len = this.items.length;
-        for (let i = 0; i < len; i++) {
-            const item = this.items[i];
-            newTotalQuantity += item.quantity;
-            newTotalPrice += item.quantity * item.price;
-        }
-        this.totalQuantity = newTotalQuantity;
-        this.totalPrice = newTotalPrice;
+    // الدالة المركزية للتحكم بالكميات من أي مكان داخل التطبيق
+    updateItemQuantity(product, change) {
+        const name = typeof product === 'string' ? product : product.name;
         
+        if (!this.cartMap[name]) {
+            if (change <= 0 || typeof product === 'string') return;
+            this.cartMap[name] = {
+                name: product.name,
+                price: product.price,
+                quantity: 0,
+                category: product.category
+            };
+        }
+
+        this.cartMap[name].quantity += change;
+
+        if (this.cartMap[name].quantity <= 0) {
+            delete this.cartMap[name];
+        }
+
+        this._syncAndRefresh();
+    }
+
+    removeItem(name) {
+        if (this.cartMap[name]) {
+            delete this.cartMap[name];
+            this._syncAndRefresh();
+        }
+    }
+
+    _syncAndRefresh() {
+        this.storageService.saveCart(this.cartMap);
+        this.updateUI();
+        this.renderDrawerItems();
+        
+        // إشعار التطبيق الرئيسي بوجود تحديث لتحديث كروت العرض في الخلفية فوراً
+        if (this.onCartChangeCallback) {
+            this.onCartChangeCallback(this.cartMap);
+        }
+    }
+
+    getCartMap() {
+        return this.cartMap;
+    }
+
+    getTotals() {
+        let count = 0;
+        let totalMoney = 0;
+        
+        Object.values(this.cartMap).forEach(item => {
+            count += item.quantity;
+            totalMoney += item.quantity * item.price;
+        });
+
+        return { count, totalMoney };
+    }
+
+    updateUI() {
+        const { count } = this.getTotals();
         if (this.cartBadge) {
-            this.cartBadge.innerText = this.totalQuantity;
-            this.cartBadge.style.display = this.totalQuantity > 0 ? 'flex' : 'none';
-        }
-        
-        if (this.cartFooter) {
-            if (this.totalQuantity > 0) this.cartFooter.classList.add('show');
-            else this.cartFooter.classList.remove('show');
-        }
-        
-        if (this.grandTotalSpan) {
-            this.grandTotalSpan.innerText = this.totalPrice.toLocaleString();
-        }
-        
-        if (this.cartDrawer && this.cartDrawer.classList.contains('open') && !this.drawerUpdateQueued) {
-            this.drawerUpdateQueued = true;
-            requestAnimationFrame(() => {
-                this.updateDrawerContent();
-                this.drawerUpdateQueued = false;
-            });
-        }
-        
-        if (this.onCartUpdate) {
-            this.onCartUpdate(this.totalQuantity, this.totalPrice);
+            this.cartBadge.innerText = count;
+            this.cartBadge.style.display = count > 0 ? 'flex' : 'none';
         }
     }
 
-    updateDrawerContent() {
+    renderDrawerItems() {
         if (!this.cartItemsList) return;
-        
-        if (this.items.length === 0) {
-            this.cartItemsList.innerHTML = '<div class="empty-cart">🛒 السلة فارغة</div>';
-            if (this.drawerTotalSpan) this.drawerTotalSpan.innerText = '0';
+
+        const itemsArray = Object.values(this.cartMap);
+        const { totalMoney } = this.getTotals();
+
+        if (itemsArray.length === 0) {
+            this.cartItemsList.innerHTML = `
+                <div class="empty-cart-state">
+                    <i class="fas fa-shopping-basket"></i>
+                    <p>سلة المشتريات فارغة حالياً</p>
+                </div>
+            `;
+            if (this.drawerTotalSpan) this.drawerTotalSpan.innerText = formatCurrency(0);
+            if (this.whatsappBtn) this.whatsappBtn.setAttribute('disabled', 'true');
             return;
         }
-        
-        const fragment = document.createDocumentFragment();
-        const len = this.items.length;
-        for (let i = 0; i < len; i++) {
-            const item = this.items[i];
-            const div = document.createElement('div');
-            div.className = 'cart-item';
-            div.setAttribute('data-name', item.name);
-            
-            const infoDiv = document.createElement('div');
-            infoDiv.className = 'cart-item-info';
-            
-            const nameDiv = document.createElement('div');
-            nameDiv.className = 'cart-item-name';
-            nameDiv.textContent = item.name;
-            
-            const priceDiv = document.createElement('div');
-            priceDiv.className = 'cart-item-price';
-            priceDiv.textContent = `${item.price.toLocaleString()} ل.س`;
-            
-            const qtyDiv = document.createElement('div');
-            qtyDiv.className = 'cart-item-qty';
-            qtyDiv.textContent = `الكمية: ${item.quantity}`;
-            
-            infoDiv.appendChild(nameDiv);
-            infoDiv.appendChild(priceDiv);
-            infoDiv.appendChild(qtyDiv);
-            
-            const removeBtn = document.createElement('button');
-            removeBtn.className = 'remove-item';
-            removeBtn.setAttribute('data-name', item.name);
-            removeBtn.innerHTML = '<i class="fas fa-trash-alt"></i>';
-            
-            div.appendChild(infoDiv);
-            div.appendChild(removeBtn);
-            fragment.appendChild(div);
-        }
-        
-        this.cartItemsList.innerHTML = '';
-        this.cartItemsList.appendChild(fragment);
-        
-        if (this.drawerTotalSpan) {
-            this.drawerTotalSpan.innerText = this.totalPrice.toLocaleString();
-        }
-    }
 
-    setRemoveItemCallback(callback) {
-        this.onRemoveItemCallback = callback;
+        if (this.whatsappBtn) this.whatsappBtn.removeAttribute('disabled');
+        this.cartItemsList.innerHTML = '';
+        const fragment = document.createDocumentFragment();
+
+        itemsArray.forEach(item => {
+            const row = document.createElement('div');
+            row.className = 'cart-item-row';
+            row.dataset.name = item.name;
+            
+            row.innerHTML = `
+                <div class="cart-item-info">
+                    <span class="cart-item-title">${escapeHtml(item.name)}</span>
+                    <span class="cart-item-price">${formatCurrency(item.price)}</span>
+                </div>
+                <div class="cart-item-actions">
+                    <div class="drawer-quantity-controls">
+                        <button class="btn-drawer-minus"><i class="fas fa-minus"></i></button>
+                        <span class="drawer-qty-value">${item.quantity}</span>
+                        <button class="btn-drawer-plus"><i class="fas fa-plus"></i></button>
+                    </div>
+                    <button class="btn-drawer-remove" aria-label="حذف العنصر"><i class="fas fa-trash-alt"></i></button>
+                </div>
+            `;
+            fragment.appendChild(row);
+        });
+
+        this.cartItemsList.appendChild(fragment);
+        if (this.drawerTotalSpan) {
+            this.drawerTotalSpan.innerText = formatCurrency(totalMoney);
+        }
     }
 
     sendToWhatsApp() {
-        if (this.items.length === 0) {
-            alert('السلة فارغة، أضف منتجات أولاً.');
-            return;
-        }
-        
-        const lines = [];
-        const len = this.items.length;
-        for (let i = 0; i < len; i++) {
-            const item = this.items[i];
+        const itemsArray = Object.values(this.cartMap);
+        if (itemsArray.length === 0) return;
+
+        const lines = ['📋 *طلب جديد من متجر حلب للتوصيل*\\n'];
+        let grandTotal = 0;
+
+        itemsArray.forEach((item, index) => {
             const subtotal = item.quantity * item.price;
-            lines.push(`🛒 *${item.name}*\n   ${item.quantity} قطعة × ${item.price.toLocaleString()} = ${subtotal.toLocaleString()} ل.س`);
-        }
-        lines.push('--------------------------');
-        lines.push(`💰 *الإجمالي النهائي: ${this.totalPrice.toLocaleString()} ل.س*`);
-        const message = lines.join('\n');
+            grandTotal += subtotal;
+            lines.push(`${index + 1}. 🛒 *${item.name}*`);
+            lines.push(`   الكمية: ${item.quantity} × السعر: ${item.price.toLocaleString('ar-EG')} ل.س`);
+            lines.push(`   المجموع: ${subtotal.toLocaleString('ar-EG')} ل.س\\n`);
+        });
+
+        lines.push('-------------------------------------');
+        lines.push(`💰 *الإجمالي النهائي للطلب: ${grandTotal.toLocaleString('ar-EG')} ل.س*`);
         
-        window.open(`https://wa.me/${this.targetNumber}?text=${encodeURIComponent(message)}`, '_blank');
-    }
-    
-    destroy() {
-        for (const [element, events] of this.boundEvents.entries()) {
-            for (const { event, handler } of events) {
-                element.removeEventListener(event, handler);
-            }
-        }
-        this.boundEvents.clear();
-        this.onRemoveItemCallback = null;
-        this.items = [];
+        const messageText = lines.join('\\n');
+        // استخدام الرابط العالمي للواتساب لضمان التوافق المطلق مع الهواتف والمتصفحات
+        const url = `https://api.whatsapp.com/send?phone=${this.targetNumber}&text=${encodeURIComponent(messageText.replace(/\\n/g, '\n'))}`;
+        window.open(url, '_blank');
     }
 }
