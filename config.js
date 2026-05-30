@@ -1,8 +1,9 @@
+// config.js - مستودع الثوابت والدوال المساعدة الموحدة للنظام
 export const CONFIG = {
     TARGET_NUMBER: "963945083365",
     API_URL: "https://script.google.com/macros/s/AKfycbxupDW04PxItTLcmYyBT1sZyXSdOl4mcdUGTGEZn6zlWaDVYIrgKoIcZ6dD_RXF37vS/exec",
     ITEMS_PER_PAGE: 12,
-    CACHE_TTL: 3600000, // 1 hour
+    CACHE_TTL: 3600000, // ساعة واحدة كمعدل حياة افتراضي للكاش المحلي
     DB_NAME: "TogvenDB",
     DB_VERSION: 4,
     STORES: {
@@ -23,28 +24,42 @@ export const CONFIG = {
     MAX_IMAGE_RETRIES: 2
 };
 
+/**
+ * توليد مفتاح فريد ومعياري لكل منتج لمنع التضارب أثناء التخزين
+ */
 export function getProductKey(productName, category = "") {
     return `${category}-${productName}`.toLowerCase().replace(/[^a-z0-9-]/g, "_");
 }
 
+/**
+ * التحقق من سلامة رابط الصورة قبل بدء عمليات الجلب والتخزين
+ */
 export function isValidImageUrl(url) {
-    return url && (url.startsWith("http://") || url.startsWith("https://"));
+    return url && url.startsWith('http');
 }
 
-export function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+/**
+ * دالة تنسيق العملة الموحدة للاستهلاك البصري (ليرة سورية ل.س)
+ */
+export function formatCurrency(value) {
+    const num = Number(value) || 0;
+    return num.toLocaleString('ar-EG') + ' ل.س';
 }
 
-export function formatCurrency(amount) {
-    return amount.toLocaleString("ar-EG") + " ل.س";
-}
-
+/**
+ * دالة تطهير النصوص وتنظيف مخرجات الـ HTML (المفقودة سابقاً)
+ * تحمي المتجر من هجمات حقن الشيفرات الخبيثة (XSS) وتمنع انهيار التصميم البصري
+ */
 export function escapeHtml(str) {
-    if (!str) return "";
-    return str
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
+    if (!str) return '';
+    return String(str).replace(/[&<>"']/g, function(m) {
+        switch (m) {
+            case '&': return '&amp;';
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '"': return '&quot;';
+            case "'": return '&#039;';
+            default: return m;
+        }
+    });
 }
