@@ -1,4 +1,4 @@
-// app.js
+// app.js - النواة المركزية والمتحكم الرئيسي لعمليات المتجر
 import { CONFIG } from './config.js';
 import { StorageService } from './StorageService.js';
 import { ProductsGrid } from './ProductsGrid.js';
@@ -8,214 +8,277 @@ import { ThemeManager } from './ThemeManager.js';
 
 class App {
     constructor() {
-        this.storage = new StorageService();
-        this.themeManager = null;
+        // إدارة الخدمات والمكونات الأساسية
+        this.storage = null;
         this.productsGrid = null;
         this.categoryManager = null;
         this.cartManager = null;
-
-        this.allProductsRaw = [];
+        this.themeManager = null;
+        
+        // الحالة التشغيلية للتطبيق
+        this.fullData = null;
         this.isOnline = navigator.onLine;
-
+        this.abortController = null;        // لإلغاء طلبات الجلب المتداخلة
+        this.retryTimeout = null;           // موازنة مهلة إعادة المحاولة
+        
+        // ربط وتخزين مراجع عناصر الـ DOM الحيوية لمنع المعالجة المتكررة
         this.elements = {
+            productsGrid: document.getElementById('productsGrid'),
             searchInput: document.getElementById('searchInput'),
             clearSearch: document.getElementById('clearSearch'),
             refreshBtn: document.getElementById('refreshBtn'),
-            offlineBanner: document.getElementById('offlineBanner'),
-            settingsBtn: document.getElementById('settingsBtn'),
+            offlinePage: document.getElementById('offlinePage'),
+            retryBtn: document.getElementById('retryConnection'),
+            settingsBtn: document.getElementById('themeToggle'), // موازن مع زر النمط أو الإعدادات
             settingsModal: document.getElementById('settingsModal'),
-            closeModalBtn: document.getElementById('closeModalBtn'),
-            clearCacheBtn: document.getElementById('clearCacheBtn')
+            modalClose: document.querySelector('.modal-close'),
+            clearCacheBtn: document.getElementById('clearCacheAction')
         };
+        
+        this.init();
     }
 
-    async start() {
-        // 1. تشغيل واجهة التخزين أولاً والموازنة
-        await this.storage.init();
-
-        // 2. تفعيل المايسترو البصري للقوالب (Themes)
-        this.themeManager = new ThemeManager();
-
-        // 3. بناء شبكة العرض والمدراء مع حقن الميكانيكيات المتبادلة
-        this.productsGrid = new ProductsGrid('productsGrid', this.storage, (product, change) => {
-            this.cartManager.updateItemQuantity(product, change);
-        });
-
-        this.categoryManager = new CategoryManager(
-            'mainCategoriesContainer',
-            'subCategoriesContainer',
-            (mainCat) => this.productsGrid.setCategory(mainCat),
-            (subCat) => this.productsGrid.setCategory(subCat === 'all' ? this.categoryManager.currentMain : subCat)
-        );
-
-        this.cartManager = new CartManager(CONFIG.TARGET_NUMBER, this.storage, (currentCartMap) => {
-            this.productsGrid.render(currentCartMap);
-        });
-
-        // 4. تفعيل مستمعي الأحداث للواجهة العامة
-        this._setupGlobalEvents();
-
-        // 5. بدء جلب البيانات وضخها داخل التطبيق
-        await this.loadApplicationData();
-    }
-
-    async loadApplicationData() {
-        this.productsGrid.renderSkeletons();
-
-        // محاولة سحب الكاش من المخزن الداخلي لسرعة الاستجابة
-        const cachedData = await this.storage.getApiCache();
-        if (cachedData) {
-            console.log('[App] Rendering via local storage cache');
-            this._processAndDistributeData(cachedData);
-        }
-
-        if (this.isOnline) {
-            await this.fetchFreshDataFromServer();
-        } else {
-            this._toggleOfflineBanner(true);
-            if (!cachedData) {
-                this._showEmptyNetworkErrorState();
-            }
-        }
-    }
-
-    async fetchFreshDataFromServer() {
+    /**
+     * الإقلاع التدريجي للمتجر والتحقق من سلامة البنية التحتية للتخزين
+     */
+    async init() {
         try {
-            const response = await fetch(CONFIG.API_URL, {
-                method: 'GET',
-                headers: { 'Accept': 'application/json' }
+            // 1. تشغيل مدير المظهر الثنائي (ليلي / نهاري)
+            this.themeManager = new ThemeManager();
+
+            // 2. تفعيل وتحضير قاعدة البيانات المحلية (IndexedDB / LocalStorage Fallback)
+            this.storage = new StorageService();
+            await this.storage.init();
+            
+            // 3. بناء شبكة المنتجات الموحدة والربط مع معالج الكميات
+            this.productsGrid = new ProductsGrid('productsGrid', this.storage, (prodName, newQty, delta) => {
+                this.handleQuantityChange(prodName, newQty, delta);
             });
 
-            if (!response.ok) throw new Error('Network spreadsheet fetch failed');
-            
-            const freshData = await response.json();
-            if (freshData && Array.isArray(freshData)) {
-                await this.storage.saveApiCache(freshData);
-                this._processAndDistributeData(freshData);
-                this._toggleOfflineBanner(false);
-            }
+            // 4. تشغيل مدير الأقسام والفئات المتقدمة
+            this.categoryManager = new CategoryManager(
+                'mainCategoriesFields',
+                'subCategoriesFields',
+                (mainCat) => this.handleMainCategorySelect(mainCat),
+                (subCat) => this.handleSubCategorySelect(subCat)
+            );
+
+            // 5. تهيئة مدير سلة المشتريات وقنوات الـ WhatsApp
+            this.cartManager = new CartManager(CONFIG.TARGET_NUMBER, () => {
+                this.syncCartToCards();
+            });
+            this.cartManager.setRemoveItemCallback((prodName) => {
+                if (this.productsGrid) this.productsGrid.removeItemFromCart(prodName);
+            });
+
+            // 6. ربط مستمعي الأحداث والشبكة والأجهزة الطرفية
+            this.initEventListeners();
+            this.setupSettingsModal();
+
+            // 7. سحب وتغذية المتجر بالبيانات الحية
+            await this.loadStoreData();
+
         } catch (error) {
-            console.error('[App] Server fetch failed, layout intact', error);
-            if (!this.allProductsRaw || this.allProductsRaw.length === 0) {
-                this._showEmptyNetworkErrorState();
-            }
+            console.error('[App Critical Error] فشل إقلاع النظام الموحد:', error);
         }
     }
 
-    _processAndDistributeData(products) {
-        this.allProductsRaw = products;
+    /**
+     * سحب البيانات الذكي (كاش محلي أولاً مع جلب بالخلفية لضمان الأداء السريع)
+     */
+    async loadStoreData() {
+        if (this.productsGrid) this.productsGrid.showSkeleton();
 
-        // معالجة واستخلاص الفئات (Categories) وهيكلتها داخل الـ Maps
-        const mainCats = new Set();
-        const subsMap = new Map();
-
-        products.forEach(p => {
-            if (p.category) {
-                mainCats.add(p.category);
-                if (p.subCategory) {
-                    if (!subsMap.has(p.category)) subsMap.set(p.category, new Set());
-                    subsMap.get(p.category).add(p.subCategory);
-                }
+        // محاولة سحب النسخة المخبأة محلياً لسرعة الاستجابة
+        const cachedData = await this.storage.getCachedApiData(CONFIG.API_URL);
+        if (cachedData) {
+            this.fullData = cachedData;
+            this.renderStore();
+            // إذا كان النظام متصلاً، نقوم بتحديث البيانات في الخلفية بهدوء دون إزعاج المستخدم
+            if (this.isOnline) {
+                this.fetchFreshData(true);
             }
-        });
-
-        // حقن الفئات لمدير القوائم
-        this.categoryManager.setSubCategoriesMap(subsMap);
-        this.categoryManager.renderMainCategories(Array.from(mainCats));
-
-        // دفع المنتجات لشبكة العرض والرندرة مع مطابقة السلة الحالية
-        this.productsGrid.setProducts(products);
-        this.productsGrid.render(this.cartManager.getCartMap());
+        } else {
+            // لا يوجد كاش، جلب إجباري ومباشر من السيرفر
+            await this.fetchFreshData(false);
+        }
     }
 
-    _setupGlobalEvents() {
-        // مستمع البحث مع إخماد التأخير الخفيف
+    /**
+     * جلب البيانات الصافية من السيرفر السحابي
+     */
+    async fetchFreshData(isBackground = false) {
+        if (!this.isOnline) {
+            if (!this.fullData) this.showOfflinePage();
+            return;
+        }
+
+        if (this.abortController) this.abortController.abort();
+        this.abortController = new AbortController();
+
+        try {
+            const response = await fetch(CONFIG.API_URL, {
+                signal: this.abortController.signal
+            });
+            
+            if (!response.ok) throw new Error('Network response status error');
+            
+            const data = await response.json();
+            if (Array.isArray(data) && data.length > 0) {
+                this.fullData = data;
+                await this.storage.cacheApiData(CONFIG.API_URL, data);
+                
+                if (this.elements.offlinePage) this.elements.offlinePage.style.display = 'none';
+                this.renderStore();
+            }
+        } catch (err) {
+            if (err.name === 'AbortError') return;
+            console.warn('[App Fetch] فشل جلب البيانات الحية:', err);
+            if (!this.fullData) this.showOfflinePage();
+        }
+    }
+
+    /**
+     * رندرة البيانات وبناء أزرار الفرز داخل واجهة المستخدم
+     */
+    renderStore() {
+        if (!this.fullData || !this.productsGrid) return;
+
+        // ضخ البيانات داخل الشبكة
+        this.productsGrid.setData(this.fullData);
+
+        // تحديث أزرار الأقسام الرئيسية والفرعية
+        const mainCats = this.productsGrid.getMainCategories();
+        this.categoryManager.mainCategories = mainCats;
+        
+        const subCatsMap = new Map();
+        mainCats.forEach(cat => {
+            subCatsMap.set(cat, this.productsGrid.getSubCategoriesFor(cat));
+        });
+        this.categoryManager.setSubCategoriesMap(subCatsMap);
+        this.categoryManager.renderMainChips();
+
+        // تفعيل الرندرة الأساسية للكروت وتطبيق السلة المخزنة
+        this.productsGrid.render();
+        this.syncCartToCards();
+    }
+
+    syncCartToCards() {
+        if (!this.productsGrid || !this.cartManager) return;
+        const items = this.productsGrid.getAllCartItems();
+        this.cartManager.updateCartState(items);
+    }
+
+    handleQuantityChange(productName, newQty, delta) {
+        this.syncCartToCards();
+    }
+
+    handleMainCategorySelect(mainCat) {
+        if (this.productsGrid) {
+            const activeSub = this.categoryManager.getCurrentSub();
+            const searchVal = this.elements.searchInput ? this.elements.searchInput.value : '';
+            this.productsGrid.setFilters(mainCat, activeSub, searchVal);
+            this.syncCartToCards();
+        }
+    }
+
+    handleSubCategorySelect(subCat) {
+        if (this.productsGrid) {
+            const activeMain = this.categoryManager.getCurrentMain();
+            const searchVal = this.elements.searchInput ? this.elements.searchInput.value : '';
+            this.productsGrid.setFilters(activeMain, subCat, searchVal);
+            this.syncCartToCards();
+        }
+    }
+
+    showOfflinePage() {
+        if (this.elements.offlinePage) {
+            this.elements.offlinePage.style.display = 'flex';
+        }
+        if (this.productsGrid) this.productsGrid.hideSkeleton();
+    }
+
+    /**
+     * تهيئة كافة الأحداث والمستمعين لعمليات البحث والتحديث والشبكة
+     */
+    initEventListeners() {
+        // معالجة صندوق البحث الذكي ومسح المدخلات
         if (this.elements.searchInput) {
-            let searchTimeout = null;
             this.elements.searchInput.addEventListener('input', (e) => {
-                clearTimeout(searchTimeout);
+                const val = e.target.value;
                 if (this.elements.clearSearch) {
-                    this.elements.clearSearch.style.display = e.target.value ? 'block' : 'none';
+                    this.elements.clearSearch.style.display = val ? 'block' : 'none';
                 }
-                searchTimeout = setTimeout(() => {
-                    this.productsGrid.setSearch(e.target.value);
-                    this.productsGrid.render(this.cartManager.getCartMap());
-                }, CONFIG.DEBOUNCE_DELAY);
+                const activeMain = this.categoryManager.getCurrentMain();
+                const activeSub = this.categoryManager.getCurrentSub();
+                if (this.productsGrid) this.productsGrid.setFilters(activeMain, activeSub, val);
             });
         }
 
         if (this.elements.clearSearch) {
             this.elements.clearSearch.addEventListener('click', () => {
-                this.elements.searchInput.value = '';
-                this.elements.clearSearch.style.display = 'none';
-                this.productsGrid.setSearch('');
-                this.productsGrid.render(this.cartManager.getCartMap());
+                if (this.elements.searchInput) {
+                    this.elements.searchInput.value = '';
+                    this.elements.searchInput.dispatchEvent(new Event('input'));
+                }
             });
         }
 
+        // زر تحديث المنتجات اليدوي لإجبار النظام على جلب أحدث البيانات
         if (this.elements.refreshBtn) {
             this.elements.refreshBtn.addEventListener('click', () => {
-                if (this.isOnline) this.fetchFreshDataFromServer();
+                this.fetchFreshData(false);
             });
         }
 
-        // مراقبة الاتصال والشبكة تلقائياً
+        // زر إعادة المحاولة في صفحة عدم الاتصال
+        if (this.elements.retryBtn) {
+            this.elements.retryBtn.addEventListener('click', () => {
+                this.loadStoreData();
+            });
+        }
+
+        // مراقبة حالة استقرار الإنترنت في المتصفح
         window.addEventListener('online', () => {
             this.isOnline = true;
-            this.fetchFreshDataFromServer();
+            this.fetchFreshData(true);
         });
+        
         window.addEventListener('offline', () => {
             this.isOnline = false;
-            this._toggleOfflineBanner(true);
+            if (!this.fullData) this.showOfflinePage();
         });
-
-        this._setupSettingsModalLogic();
     }
-
-    _setupSettingsModalLogic() {
-        const { settingsBtn, settingsModal, closeModalBtn, clearCacheBtn } = this.elements;
+    
+    /**
+     * تهيئة وإدارة نافذة الإعدادات لتنظيف الكاش والذاكرة المؤقتة للصور
+     */
+    setupSettingsModal() {
+        const modal = this.elements.settingsModal;
+        const closeBtn = this.elements.modalClose;
+        const clearCacheBtn = this.elements.clearCacheBtn;
         
-        if (settingsBtn && settingsModal) {
-            settingsBtn.addEventListener('click', () => settingsModal.classList.add('open'));
-            if (closeModalBtn) closeModalBtn.addEventListener('click', () => settingsModal.classList.remove('open'));
-            
-            settingsModal.addEventListener('click', (e) => {
-                if (e.target === settingsModal) settingsModal.classList.remove('open');
-            });
-        }
-
+        if (!modal) return;
+        
+        const closeModal = () => modal.classList.remove('open');
+        
+        if (closeBtn) closeBtn.addEventListener('click', closeModal);
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeModal();
+        });
+        
         if (clearCacheBtn) {
             clearCacheBtn.addEventListener('click', async () => {
-                if (confirm('سيتم تنظيف كاش الصور والمنتجات بالكامل بشكل هندسي، هل تود الاستمرار؟')) {
-                    await this.storage.clearAllCache();
+                if (confirm('سيتم مسح جميع الصور والبيانات المخزنة لمتجر حلب. هل أنت متأكد؟')) {
+                    if (this.storage) await this.storage.clearAllCache();
+                    alert('تم مسح الكاش بنجاح، سيتم إعادة تحميل المتجر.');
                     location.reload();
                 }
             });
         }
     }
-
-    _toggleOfflineBanner(show) {
-        if (this.elements.offlineBanner) {
-            this.elements.offlineBanner.style.display = show ? 'block' : 'none';
-        }
-    }
-
-    _showEmptyNetworkErrorState() {
-        const gridContainer = document.getElementById('productsGrid');
-        if (gridContainer) {
-            gridContainer.innerHTML = `
-                <div class="empty-grid-state">
-                    <i class="fas fa-wifi"></i>
-                    <p>أنت تصفح بدون إنترنت حالياً، ولا توجد نسخة مخزنة لعرضها. يرجى التحقق من اتصال الشبكة وإعادة المحاولة.</p>
-                </div>
-            `;
-        }
-    }
 }
 
-// إقلاع التطبيق الهندسي الآمن
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => new App().start());
-} else {
-    new App().start();
-}
+// تشغيل وضمان استدعاء الكلاس بعد اكتمال قراءة البنية البرمجية بالكامل
+export { App };
+new App();
