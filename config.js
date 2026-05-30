@@ -1,6 +1,6 @@
 export const CONFIG = {
     TARGET_NUMBER: "963945083365",
-    API_URL: "https://script.google.com/macros/s/AKfycbxupDW04PxItTLcmYyBT1sZyXSdOl4mcdUGTGEZn6zlWaDVYIrgKoIcZ6dD_RXF37vS/exec",
+    API_URL: "https://script.google.com/macros/s/AKfycbxhS7woD3d3QO7uLR6Pl8U953ja1bQY9FQYIpjDcYAvvKUto3rA24LjLMkTKeIW-lzi/exec",
     ITEMS_PER_PAGE: 12,
     CACHE_TTL: 3600000, // 1 hour
     DB_NAME: "TogvenDB",
