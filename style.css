@@ -406,7 +406,7 @@ body {
     transform: translateY(-2px) scale(0.99);
 }
 
-/* صورة المنتج - تغطي العرض بالكامل وزوايا منحنية */
+/* صورة المنتج */
 .product-img {
     width: 100%;
     aspect-ratio: 1 / 1;
@@ -414,13 +414,116 @@ body {
     background: linear-gradient(135deg, #f0faf5, #e8f7f0);
     display: block;
     transition: transform 0.35s ease;
-    /* جعل الصورة تلتصق بالحافة العلوية للبطاقة مع انحناء الزوايا العلوية فقط */
     border-radius: var(--radius-card) var(--radius-card) 0 0;
     position: relative;
     z-index: 1;
 }
 .product-card:hover .product-img {
     transform: scale(1.02);
+}
+
+/* ===== غلاف الصورة مع السلايدر ===== */
+.product-img-wrapper {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--radius-card) var(--radius-card) 0 0;
+    background: linear-gradient(135deg, #f0faf5, #e8f7f0);
+}
+
+/* أزرار السهام */
+.slider-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(255,255,255,0.82);
+    backdrop-filter: blur(6px);
+    border: none;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    font-size: 20px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 5;
+    color: var(--text-dark);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.14);
+    transition: background 0.18s, transform 0.15s;
+    padding: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+.product-img-wrapper.has-slider:hover .slider-arrow,
+.product-img-wrapper.has-slider:focus-within .slider-arrow {
+    opacity: 1;
+    pointer-events: auto;
+}
+/* على الموبايل: إظهارها دائماً */
+@media (max-width: 640px) {
+    .slider-arrow {
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        width: 26px;
+        height: 26px;
+        font-size: 17px;
+    }
+}
+.slider-prev { right: 6px; }
+.slider-next { left: 6px; }
+.slider-arrow:hover {
+    background: var(--primary);
+    color: white;
+    transform: translateY(-50%) scale(1.1);
+}
+.slider-arrow:active { transform: translateY(-50%) scale(0.93); }
+
+[data-theme="dark"] .slider-arrow {
+    background: rgba(30,40,55,0.85);
+    color: var(--text-dark);
+}
+
+/* نقاط التنقل */
+.slider-dots {
+    position: absolute;
+    bottom: 7px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 5px;
+    z-index: 5;
+}
+.slider-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.55);
+    border: 1.5px solid rgba(255,255,255,0.7);
+    cursor: pointer;
+    transition: background 0.2s, transform 0.2s, width 0.2s;
+    flex-shrink: 0;
+}
+.slider-dot.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    width: 18px;
+    border-radius: 4px;
+    transform: scaleY(1.05);
+}
+
+/* تأثير انتقال الصورة */
+.product-img.slide-fade {
+    animation: slideFade 0.28s ease;
+}
+@keyframes slideFade {
+    0% { opacity: 0.45; transform: scale(0.97); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+/* إزالة border-radius المكرر من img لأن الغلاف يتكفل بها */
+.product-img-wrapper .product-img {
+    border-radius: 0;
 }
 
 /* تفاصيل المنتج */
@@ -914,8 +1017,11 @@ body {
         grid-template-columns: 1fr;
     }
     /* تكبير الصورة قليلاً وجعلها تتنفس */
-    .product-img {
+    .product-img-wrapper {
         border-radius: var(--radius-card) var(--radius-card) 0 0;
+    }
+    .product-img {
+        border-radius: 0;
     }
     /* توسيع أزرار التحكم لسهولة اللمس */
     .qty-btn {
