@@ -9,7 +9,7 @@ export class StorageService {
         this.lastTimestamp = null;
         this.initPromise = this._initInternal();
         
-        // تتبع عناوين URL لتحريرها لاحقاً
+        // تتبع عناوين URL لتحريرها عند تدمير المكونات وليس بوقت عشوائي
         this.activeObjectURLs = new Set();
         
         // حد أقصى لعدد الصور المخزنة (تقريبي)
@@ -22,16 +22,19 @@ export class StorageService {
 
     async _initInternal(retries = 2) {
         try {
-            if (!window.Dexie) {
-                throw new Error('Dexie library not loaded');
+            // التحقق من وجود مكتبة Dexie في النطاق العالمي أو كموديول
+            const DexieInstance = window.Dexie;
+            if (!DexieInstance) {
+                throw new Error('Dexie library not loaded in window scope');
             }
-            this.db = new Dexie(CONFIG.DB_NAME);
+            
+            this.db = new DexieInstance(CONFIG.DB_NAME);
             this.db.version(CONFIG.DB_VERSION).stores({
                 [CONFIG.STORES.IMAGES]: 'url, lastUsed',
                 [CONFIG.STORES.API_CACHE]: 'key'
             });
             await this.db.open();
-            console.log('[Storage] IndexedDB ready');
+            console.log('[Storage] IndexedDB ready via Dexie');
             this.useFallback = false;
             
             // تنظيف الصور القديمة في الخلفية
@@ -39,7 +42,6 @@ export class StorageService {
         } catch (err) {
             console.warn('[Storage] IndexedDB failed, using localStorage fallback', err);
             if (retries > 0) {
-                // محاولة إعادة فتح بعد تأخير
                 await new Promise(r => setTimeout(r, 500));
                 return this._initInternal(retries - 1);
             }
@@ -53,7 +55,7 @@ export class StorageService {
         return this.initPromise;
     }
 
-    // ========== إدارة الصور مع LRU تقريبي ==========
+    // ========== إدارة الصور مع LRU ومطابقة الصلاحية ==========
     async getImageBlob(url, maxAge = 7 * 24 * 60 * 60 * 1000) { // أسبوع واحد
         await this.waitForReady();
         if (!url) return null;
@@ -63,14 +65,14 @@ export class StorageService {
         }
 
         try {
-            const record = await this.db.images.get(url);
+            const record = await this.db[CONFIG.STORES.IMAGES].get(url);
             if (record && record.blob) {
-                // تحديث وقت آخر استخدام (LRU)
-                await this.db.images.update(url, { lastUsed: Date.now() });
+                // تحديث وقت آخر استخدام لآلية LRU
+                await this.db[CONFIG.STORES.IMAGES].update(url, { lastUsed: Date.now() });
+                
                 // التحقق من صلاحية العمر
                 if (record.timestamp && (Date.now() - record.timestamp) > maxAge) {
-                    // تجاوز الصلاحية - حذف وإرجاع null
-                    await this.db.images.delete(url);
+                    await this.db[CONFIG.STORES.IMAGES].delete(url);
                     return null;
                 }
                 return record.blob;
@@ -92,13 +94,12 @@ export class StorageService {
         }
 
         try {
-            // أولاً: التحقق من عدد الصور المخزنة
-            const count = await this.db.images.count();
+            const count = await this.db[CONFIG.STORES.IMAGES].count();
             if (count >= this.maxImageCacheCount) {
                 await this._evictOldestImages(Math.floor(count * 0.2)); // حذف 20% الأقدم
             }
             
-            await this.db.images.put({
+            await this.db[CONFIG.STORES.IMAGES].put({
                 url: url,
                 blob: blob,
                 timestamp: Date.now(),
@@ -106,12 +107,11 @@ export class StorageService {
             });
         } catch (e) {
             if (e.name === 'QuotaExceededError') {
-                // مساحة غير كافية – نحذف أقدم الصور ونحاول مرة واحدة
                 await this._evictOldestImages(Math.floor(this.maxImageCacheCount * 0.5));
                 try {
-                    await this.db.images.put({ url, blob, timestamp: Date.now(), lastUsed: Date.now() });
+                    await this.db[CONFIG.STORES.IMAGES].put({ url, blob, timestamp: Date.now(), lastUsed: Date.now() });
                 } catch (e2) {
-                    console.warn('[Storage] Still cannot save image', e2);
+                    console.warn('[Storage] Critical QuotaExceededError on IndexedDB', e2);
                 }
             } else {
                 console.warn('[Storage] saveImageBlob failed', e);
@@ -122,10 +122,10 @@ export class StorageService {
     async _evictOldestImages(howMany) {
         if (howMany <= 0) return;
         try {
-            const oldest = await this.db.images.orderBy('lastUsed').limit(howMany).toArray();
+            const oldest = await this.db[CONFIG.STORES.IMAGES].orderBy('lastUsed').limit(howMany).toArray();
             const urls = oldest.map(r => r.url);
-            await this.db.images.bulkDelete(urls);
-            console.log(`[Storage] Evicted ${urls.length} old images`);
+            await this.db[CONFIG.STORES.IMAGES].bulkDelete(urls);
+            console.log(`[Storage] Evicted ${urls.length} old images from IndexedDB`);
         } catch (e) {
             console.warn('[Storage] Eviction failed', e);
         }
@@ -134,19 +134,25 @@ export class StorageService {
     async _cleanOldImages(maxAge = 30 * 24 * 60 * 60 * 1000) { // 30 يوم
         try {
             const cutoff = Date.now() - maxAge;
-            await this.db.images.where('timestamp').below(cutoff).delete();
-        } catch (e) {}
+            await this.db[CONFIG.STORES.IMAGES].where('timestamp').below(cutoff).delete();
+        } catch (e) {
+            console.warn('[Storage] Background cleanup failed', e);
+        }
     }
     
     async _getImageFromLocalStorage(url) {
         return new Promise((resolve) => {
-            const data = localStorage.getItem(`img_${url}`);
-            if (data && data.startsWith('data:image')) {
-                fetch(data)
-                    .then(res => res.blob())
-                    .then(blob => resolve(blob))
-                    .catch(() => resolve(null));
-            } else {
+            try {
+                const data = localStorage.getItem(`img_${url}`);
+                if (data && data.startsWith('data:image')) {
+                    fetch(data)
+                        .then(res => res.blob())
+                        .then(blob => resolve(blob))
+                        .catch(() => resolve(null));
+                } else {
+                    resolve(null);
+                }
+            } catch (e) {
                 resolve(null);
             }
         });
@@ -157,14 +163,15 @@ export class StorageService {
         reader.onloadend = () => {
             try {
                 localStorage.setItem(`img_${url}`, reader.result);
-                // الحد من حجم localStorage بحذف أقدم الصور إذا تجاوز 4.5 ميجابايت
                 this._trimLocalStorageImages();
             } catch (e) {
                 if (e.name === 'QuotaExceededError') {
                     this._clearOldLocalStorageImages();
                     try {
                         localStorage.setItem(`img_${url}`, reader.result);
-                    } catch (e2) {}
+                    } catch (e2) {
+                        console.warn('[Storage] LocalStorage fallback completely full');
+                    }
                 }
             }
         };
@@ -182,7 +189,7 @@ export class StorageService {
                 items.push({ key, size: val ? val.length : 0 });
             }
         }
-        if (total > 4.5 * 1024 * 1024) { // أكثر من 4.5 ميجا
+        if (total > 4.5 * 1024 * 1024) { 
             items.sort((a, b) => a.size - b.size);
             let removed = 0;
             for (let item of items) {
@@ -191,7 +198,7 @@ export class StorageService {
                 total -= item.size;
                 if (total < 3 * 1024 * 1024) break;
             }
-            console.log(`[Storage] Removed ${removed} images from localStorage`);
+            console.log(`[Storage] Trimmed ${removed} images from localStorage`);
         }
     }
     
@@ -201,29 +208,32 @@ export class StorageService {
             const key = localStorage.key(i);
             if (key && key.startsWith('img_')) keys.push(key);
         }
-        // نحذف نصفها
         const toDelete = keys.slice(0, Math.floor(keys.length / 2));
         toDelete.forEach(k => localStorage.removeItem(k));
     }
 
-    // ========== إدارة كاش API ==========
+    // ========== إدارة كاش واجهة الـ API ==========
     async getApiCache() {
         await this.waitForReady();
 
         if (this.useFallback) {
             const cached = localStorage.getItem('apiCache');
             if (cached) {
-                const { timestamp, data } = JSON.parse(cached);
-                if (Date.now() - timestamp < CONFIG.CACHE_TTL) {
-                    this.lastTimestamp = timestamp;
-                    return data;
+                try {
+                    const { timestamp, data } = JSON.parse(cached);
+                    if (Date.now() - timestamp < CONFIG.CACHE_TTL) {
+                        this.lastTimestamp = timestamp;
+                        return data;
+                    }
+                } catch (e) {
+                    return null;
                 }
             }
             return null;
         }
 
         try {
-            const record = await this.db.apiCache.get('mainData');
+            const record = await this.db[CONFIG.STORES.API_CACHE].get('mainData');
             if (record && (Date.now() - record.timestamp < CONFIG.CACHE_TTL)) {
                 this.lastTimestamp = record.timestamp;
                 return record.data;
@@ -240,12 +250,16 @@ export class StorageService {
         this.lastTimestamp = timestamp;
 
         if (this.useFallback) {
-            localStorage.setItem('apiCache', JSON.stringify({ timestamp, data }));
+            try {
+                localStorage.setItem('apiCache', JSON.stringify({ timestamp, data }));
+            } catch (e) {
+                console.warn('[Storage] LocalStorage full, cannot save API cache', e);
+            }
             return;
         }
 
         try {
-            await this.db.apiCache.put({
+            await this.db[CONFIG.STORES.API_CACHE].put({
                 key: 'mainData',
                 timestamp,
                 data: data
@@ -269,15 +283,15 @@ export class StorageService {
         }
 
         try {
-            await this.db.images.clear();
-            await this.db.apiCache.clear();
-            console.log('[Storage] All cache cleared');
+            await this.db[CONFIG.STORES.IMAGES].clear();
+            await this.db[CONFIG.STORES.API_CACHE].clear();
+            console.log('[Storage] IndexedDB cache completely cleared');
         } catch (e) {
             console.warn('[Storage] clearAllCache failed', e);
         }
     }
     
-    // إصدار عناوين objectURL المخزنة (للاستخدام من قبل المكونات)
+    // إدارة آمنة للروابط المؤقتة لمنع اختفاء الصور فجأة أثناء التصفح
     revokeObjectURL(url) {
         if (this.activeObjectURLs.has(url)) {
             URL.revokeObjectURL(url);
@@ -287,14 +301,20 @@ export class StorageService {
     
     registerObjectURL(url) {
         this.activeObjectURLs.add(url);
-        // تنظيف تلقائي بعد دقيقة (لن يتم استخدامها بعدها)
-        setTimeout(() => this.revokeObjectURL(url), 60000);
+    }
+
+    // تفريغ كافة الروابط عند الحاجة (مثال: عند الخروج أو تغيير الصفحة بشكل كامل)
+    revokeAllObjectURLs() {
+        this.activeObjectURLs.forEach(url => URL.revokeObjectURL(url));
+        this.activeObjectURLs.clear();
     }
 
     saveCart(cartMap) {
         try {
             localStorage.setItem(CONFIG.STORAGE_KEYS.CART, JSON.stringify(cartMap));
-        } catch (e) {}
+        } catch (e) {
+            console.warn('[Storage] Failed to save cart to localStorage', e);
+        }
     }
 
     loadCart() {
@@ -308,14 +328,16 @@ export class StorageService {
 
     getLastUpdateTimestamp() {
         if (this.lastTimestamp) return this.lastTimestamp;
-        if (this.useFallback) {
-            const cached = localStorage.getItem('apiCache');
-            if (cached) {
-                const { timestamp } = JSON.parse(cached);
-                this.lastTimestamp = timestamp;
-                return timestamp;
+        try {
+            if (this.useFallback) {
+                const cached = localStorage.getItem('apiCache');
+                if (cached) {
+                    const { timestamp } = JSON.parse(cached);
+                    this.lastTimestamp = timestamp;
+                    return timestamp;
+                }
             }
-        }
+        } catch (e) {}
         return null;
     }
 }
