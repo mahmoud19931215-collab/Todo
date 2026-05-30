@@ -2,234 +2,317 @@ import { escapeHtml } from './config.js';
 
 export class ProductCard {
     constructor(product, storage, onQuantityChange, initialQty = 0) {
-        this.product = product;
-        this.storage = storage;
+        this.product    = product;
+        this.storage    = storage;
         this.onQuantityChange = onQuantityChange;
-        this.quantity = initialQty;
-        this.element = null;
-        this.qtyInput = null;
+        this.quantity   = initialQty;
+        this.element    = null;
+        this.qtyInput   = null;
         this.subtotalSpan = null;
-        this.subtotalRow = null;
+        this.subtotalRow  = null;
         this.debounceTimer = null;
-        this.imageElement = null;
-        this.currentSlide = 0;
-        this.images = [];
-        this._blobUrls = {};   // كاش محلي للـ blob URLs لتجنب إعادة التحميل
+
+        // slider state
+        this.images      = [];
+        this.cur         = 0;          // صفحة حالية
+        this._blobs      = {};         // url → objectURL (كاش في الذاكرة)
+        this._track      = null;       // .sl-track
+        this._slides     = [];         // كل .sl-slide
+        this._dots       = [];         // كل .sl-dot
+        this._counter    = null;       // span العداد
+        this._dragging   = false;
+        this._startX     = 0;
+        this._moved      = false;
     }
 
+    // ─── جمع روابط الصور ───────────────────────────────────────────
     _collectImages() {
-        const imgs = [];
-        if (Array.isArray(this.product.images)) {
-            this.product.images.forEach(url => { if (url) imgs.push(url); });
-        } else {
-            [
-                this.product.imageUrl,
-                this.product.imageUrl2 || this.product.image_right,
-                this.product.imageUrl3 || this.product.image_left,
-            ].forEach(url => { if (url) imgs.push(url); });
-        }
-        return imgs.filter(url => url && url.startsWith('http'));
+        if (Array.isArray(this.product.images))
+            return this.product.images.filter(u => u?.startsWith('http'));
+        return [
+            this.product.imageUrl,
+            this.product.imageUrl2 || this.product.image_right,
+            this.product.imageUrl3 || this.product.image_left,
+        ].filter(u => u?.startsWith('http'));
     }
 
+    // ─── render ────────────────────────────────────────────────────
     render() {
         this.images = this._collectImages();
-        const hasMultiple = this.images.length > 1;
-        const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+        const n   = this.images.length;
+        const has = n > 1;
 
         const card = document.createElement('div');
         card.className = 'product-card';
-        card.setAttribute('data-name', this.product.name);
+        card.setAttribute('data-name',  this.product.name);
         card.setAttribute('data-price', this.product.price);
         card.setAttribute('data-stock', this.product.stock || 999);
 
-        const subtotalDisplay = this.quantity > 0
+        // ── صورة/slider ──
+        const imgBox = document.createElement('div');
+        imgBox.className = 'sl-wrap' + (has ? ' sl-multi' : '');
+
+        if (!has) {
+            // صورة وحيدة — أبسط ممكن
+            const img = this._makeImg(0);
+            imgBox.appendChild(img);
+            this._slides = [img];
+        } else {
+            // track يحتوي كل الصور مرصوفة
+            const track = document.createElement('div');
+            track.className = 'sl-track';
+            track.style.width = n * 100 + '%';
+            this._track = track;
+
+            for (let i = 0; i < n; i++) {
+                const slide = document.createElement('div');
+                slide.className = 'sl-slide';
+                slide.style.width = (100 / n) + '%';
+                const img = this._makeImg(i);
+                slide.appendChild(img);
+                track.appendChild(slide);
+                this._slides.push(slide);
+            }
+
+            imgBox.appendChild(track);
+
+            // zones اليمين/اليسار (بدون HTML معقد)
+            const zr = document.createElement('div');
+            zr.className = 'sl-zone sl-zr';
+            const zl = document.createElement('div');
+            zl.className = 'sl-zone sl-zl';
+            imgBox.appendChild(zr);
+            imgBox.appendChild(zl);
+
+            // نقاط
+            const dotsWrap = document.createElement('div');
+            dotsWrap.className = 'sl-dots';
+            for (let i = 0; i < n; i++) {
+                const d = document.createElement('span');
+                d.className = 'sl-dot' + (i === 0 ? ' on' : '');
+                dotsWrap.appendChild(d);
+                this._dots.push(d);
+            }
+            imgBox.appendChild(dotsWrap);
+
+            // عداد
+            const ctr = document.createElement('div');
+            ctr.className = 'sl-ctr';
+            ctr.innerHTML = `<b class="sl-cn">1</b>/${n}`;
+            this._counter = ctr.querySelector('.sl-cn');
+            imgBox.appendChild(ctr);
+
+            // أحداث السحب/اللمس
+            this._bindDrag(imgBox);
+
+            // zones
+            zr.addEventListener('click', e => { e.stopPropagation(); this._go(this.cur - 1); });
+            zl.addEventListener('click', e => { e.stopPropagation(); this._go(this.cur + 1); });
+
+            // نقاط
+            this._dots.forEach((d, i) =>
+                d.addEventListener('click', e => { e.stopPropagation(); this._go(i); })
+            );
+        }
+
+        // ── معلومات المنتج ──
+        const info = document.createElement('div');
+        info.className = 'product-info';
+        const subtotalHtml = this.quantity > 0
             ? `<div class="item-subtotal">المجموع: <span class="subtotal-val">${(this.quantity * this.product.price).toLocaleString()}</span> ل.س</div>`
-            : `<div class="item-subtotal" style="display:none;">المجموع: <span class="subtotal-val">0</span> ل.س</div>`;
+            : `<div class="item-subtotal" style="display:none">المجموع: <span class="subtotal-val">0</span> ل.س</div>`;
 
-        // النقاط فقط — بدون أزرار سهام
-        const dotsHtml = hasMultiple
-            ? `<div class="slider-dots">${this.images.map((_, i) =>
-                `<span class="slider-dot${i === 0 ? ' active' : ''}" data-index="${i}"></span>`
-              ).join('')}</div>`
-            : '';
+        info.innerHTML = `
+            <div class="product-name">${escapeHtml(this.product.name)}</div>
+            <div class="product-price">${this.product.price.toLocaleString()} ل.س</div>
+            ${subtotalHtml}
+            <div class="qty-controls">
+                <button class="qty-btn inc-qty">+</button>
+                <input type="number" class="qty-input" value="${this.quantity}"
+                       min="0" max="${this.product.stock || 999}" step="1">
+                <button class="qty-btn dec-qty">-</button>
+            </div>`;
 
-        // مؤشر الصورة الحالية (1/3)
-        const counterHtml = hasMultiple
-            ? `<div class="slider-counter"><span class="slider-current">1</span>/<span class="slider-total">${this.images.length}</span></div>`
-            : '';
+        card.appendChild(imgBox);
+        card.appendChild(info);
 
-        card.innerHTML = `
-            <div class="product-img-wrapper${hasMultiple ? ' has-slider' : ''}">
-                <img class="product-img" id="${uniqueId}"
-                     src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect width='200' height='200' fill='%23f0f0f0'/%3E%3C/svg%3E"
-                     alt="${escapeHtml(this.product.name)}" loading="lazy">
-                ${hasMultiple ? `<div class="slider-zone zone-prev" aria-label="السابق"></div><div class="slider-zone zone-next" aria-label="التالي"></div>` : ''}
-                ${dotsHtml}
-                ${counterHtml}
-            </div>
-            <div class="product-info">
-                <div class="product-name">${escapeHtml(this.product.name)}</div>
-                <div class="product-price">${this.product.price.toLocaleString()} ل.س</div>
-                ${subtotalDisplay}
-                <div class="qty-controls">
-                    <button class="qty-btn inc-qty">+</button>
-                    <input type="number" class="qty-input" value="${this.quantity}" min="0" max="${this.product.stock || 999}" step="1">
-                    <button class="qty-btn dec-qty">-</button>
-                </div>
-            </div>
-        `;
+        this.element      = card;
+        this.qtyInput     = info.querySelector('.qty-input');
+        this.subtotalSpan = info.querySelector('.subtotal-val');
+        this.subtotalRow  = info.querySelector('.item-subtotal');
 
-        this.element = card;
-        this.qtyInput = card.querySelector('.qty-input');
-        this.subtotalSpan = card.querySelector('.subtotal-val');
-        this.subtotalRow = card.querySelector('.item-subtotal');
-        this.imageElement = card.querySelector(`#${uniqueId}`);
-
-        // أزرار الكمية
-        card.querySelector('.inc-qty').addEventListener('click', e => { e.stopPropagation(); this.changeQuantity(1); });
-        card.querySelector('.dec-qty').addEventListener('click', e => { e.stopPropagation(); this.changeQuantity(-1); });
+        // أحداث الكمية
+        info.querySelector('.inc-qty').addEventListener('click', e => { e.stopPropagation(); this.changeQuantity(1); });
+        info.querySelector('.dec-qty').addEventListener('click', e => { e.stopPropagation(); this.changeQuantity(-1); });
         this.qtyInput.addEventListener('change', e => {
-            let v = parseInt(e.target.value);
-            if (isNaN(v)) v = 0;
-            const max = this.product.stock || 999;
-            v = Math.min(max, Math.max(0, v));
-            const delta = v - this.quantity;
-            if (delta !== 0) { this.quantity = v; this.updateUI(); if (this.onQuantityChange) this.onQuantityChange(this.product.name, this.quantity, delta); }
+            let v = parseInt(e.target.value) || 0;
+            v = Math.min(this.product.stock || 999, Math.max(0, v));
+            const d = v - this.quantity;
+            if (d) { this.quantity = v; this.updateUI(); if (this.onQuantityChange) this.onQuantityChange(this.product.name, v, d); }
             this.qtyInput.value = this.quantity;
         });
 
-        if (hasMultiple) {
-            // Zones اليمين واليسار
-            card.querySelector('.zone-prev').addEventListener('click', e => { e.stopPropagation(); this.prevSlide(); });
-            card.querySelector('.zone-next').addEventListener('click', e => { e.stopPropagation(); this.nextSlide(); });
-
-            // النقاط
-            card.querySelectorAll('.slider-dot').forEach(dot => {
-                dot.addEventListener('click', e => { e.stopPropagation(); this.goToSlide(+dot.dataset.index); });
-            });
-
-            // Swipe
-            this._initSwipe(card.querySelector('.product-img-wrapper'));
-        }
-
-        this.loadImage();
+        // تحميل الصور
+        this._loadAll();
         this.updateUI();
         return card;
     }
 
-    _initSwipe(el) {
-        if (!el) return;
-        let sx = 0, sy = 0, moving = false;
-        el.addEventListener('touchstart', e => {
-            sx = e.touches[0].clientX;
-            sy = e.touches[0].clientY;
-            moving = false;
-        }, { passive: true });
-        el.addEventListener('touchmove', e => {
-            // منع scroll الصفحة لو كان السحب أفقي أكثر من عمودي
-            const dx = Math.abs(e.touches[0].clientX - sx);
-            const dy = Math.abs(e.touches[0].clientY - sy);
-            if (dx > dy && dx > 8) { moving = true; }
+    // ─── صنع عنصر img (placeholder فوري) ─────────────────────────
+    _makeImg(index) {
+        const img = document.createElement('img');
+        img.className = 'sl-img';
+        img.alt = escapeHtml(this.product.name);
+        img.loading = 'lazy';
+        // placeholder SVG خفيف (بدون fetch)
+        img.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3C/svg%3E";
+        img.dataset.index = index;
+        return img;
+    }
+
+    // ─── تحميل كل الصور ───────────────────────────────────────────
+    async _loadAll() {
+        if (!this.images.length) { this._setPlaceholder(0); return; }
+        // الصورة الأولى = أولوية
+        await this._loadOne(0, true);
+        // باقي الصور في الخلفية بدون انتظار
+        for (let i = 1; i < this.images.length; i++) {
+            this._loadOne(i, false);
+        }
+    }
+
+    async _loadOne(index, urgent) {
+        const url = this.images[index];
+        if (!url) return;
+
+        // لو عندنا objectURL جاهز
+        if (this._blobs[url]) { this._applyImg(index, this._blobs[url]); return; }
+
+        // IndexedDB cache
+        try {
+            const blob = await this.storage.getImageBlob(url);
+            if (blob) {
+                const ou = URL.createObjectURL(blob);
+                this._blobs[url] = ou;
+                this._applyImg(index, ou);
+                return;
+            }
+        } catch (_) {}
+
+        // تحميل مباشر
+        try {
+            // للصورة الأولى: ضع الرابط مباشرة بدون انتظار fetch
+            if (urgent) this._applyImg(index, url);
+
+            const res = await fetch(url, { mode: 'cors', cache: 'force-cache' });
+            if (!res.ok) throw 0;
+            const blob = await res.blob();
+            const ou   = URL.createObjectURL(blob);
+            this._blobs[url] = ou;
+            this.storage.saveImageBlob(url, blob).catch(() => {});
+            this._applyImg(index, ou);  // يحدّث لو الصورة المباشرة كانت أبطأ
+        } catch (_) {
+            if (!urgent) return;
+            // fallback placeholder
+            this._setPlaceholder(index);
+        }
+    }
+
+    _applyImg(index, src) {
+        // الصورة الوحيدة
+        if (!this._track && this._slides[0]) {
+            this._slides[0].src = src; return;
+        }
+        // داخل track
+        const slide = this._slides[index];
+        if (!slide) return;
+        const img = slide.querySelector('.sl-img');
+        if (img) img.src = src;
+    }
+
+    _setPlaceholder(index) {
+        this._applyImg(index, 'https://via.placeholder.com/300?text=No+Image');
+    }
+
+    // ─── التنقل ────────────────────────────────────────────────────
+    _go(to) {
+        const n = this.images.length;
+        if (n <= 1) return;
+        const next = ((to % n) + n) % n;
+        if (next === this.cur) return;
+        this.cur = next;
+        this._syncTrack(true);
+        this._syncDots();
+        this._syncCounter();
+    }
+
+    // translateX بالنسبة المئوية على الـ track
+    // في RTL: الصورة 0 على اليمين، الصورة 1 بجانبها على اليسار
+    // نحرك الـ track يساراً بـ (index × 100/n)%
+    _syncTrack(animated) {
+        if (!this._track) return;
+        const pct = this.cur * (100 / this.images.length);
+        this._track.style.transition = animated
+            ? 'transform .28s cubic-bezier(.4,0,.2,1)'
+            : 'none';
+        // RTL: flex-direction:row (الصورة 0 على اليسار في DOM)
+        // لذلك نحرك بـ translateX سالب
+        this._track.style.transform = `translateX(-${pct}%)`;
+    }
+
+    _syncDots() {
+        this._dots.forEach((d, i) => d.classList.toggle('on', i === this.cur));
+    }
+
+    _syncCounter() {
+        if (this._counter) this._counter.textContent = this.cur + 1;
+    }
+
+    // ─── drag / swipe ──────────────────────────────────────────────
+    _bindDrag(el) {
+        // Mouse
+        el.addEventListener('mousedown',  e => this._dragStart(e.clientX));
+        window.addEventListener('mousemove', e => { if (this._dragging) this._dragMove(e.clientX); });
+        window.addEventListener('mouseup',   e => { if (this._dragging) this._dragEnd(e.clientX); });
+
+        // Touch
+        el.addEventListener('touchstart', e => this._dragStart(e.touches[0].clientX), { passive: true });
+        el.addEventListener('touchmove',  e => {
+            if (!this._dragging) return;
+            const dx = Math.abs(e.touches[0].clientX - this._startX);
+            const dy = Math.abs(e.touches[0].clientY - (this._startY || 0));
+            // اسمح بالسحب الأفقي فقط
+            if (dx > dy && dx > 6) this._moved = true;
         }, { passive: true });
         el.addEventListener('touchend', e => {
-            const diff = sx - e.changedTouches[0].clientX;
-            if (moving && Math.abs(diff) > 25) {
-                diff > 0 ? this.nextSlide() : this.prevSlide();
-            }
-            moving = false;
+            if (this._dragging) this._dragEnd(e.changedTouches[0].clientX);
         }, { passive: true });
+
+        el.addEventListener('touchstart', e => { this._startY = e.touches[0].clientY; }, { passive: true });
     }
 
-    goToSlide(index) {
-        if (!this.element || this.images.length <= 1) return;
-        const prev = this.currentSlide;
-        this.currentSlide = ((index % this.images.length) + this.images.length) % this.images.length;
-        if (prev === this.currentSlide) return;
-        const dir = this.currentSlide > prev ? 'left' : 'right';
-        this._animateSlide(dir);
-        this._updateDots();
-        this._updateCounter();
-        this._showSlideImage(this.currentSlide);
+    _dragStart(x) {
+        this._dragging = true;
+        this._moved    = false;
+        this._startX   = x;
     }
 
-    nextSlide() { this.goToSlide(this.currentSlide + 1); }
-    prevSlide() { this.goToSlide(this.currentSlide - 1); }
-
-    _animateSlide(dir) {
-        if (!this.imageElement) return;
-        const img = this.imageElement;
-        img.style.transition = 'none';
-        img.style.transform = dir === 'left' ? 'translateX(-12%)' : 'translateX(12%)';
-        img.style.opacity = '0.3';
-        // force reflow
-        img.offsetHeight;
-        img.style.transition = 'transform 0.22s cubic-bezier(0.25,0.46,0.45,0.94), opacity 0.18s ease';
-        img.style.transform = 'translateX(0)';
-        img.style.opacity = '1';
+    _dragMove(x) {
+        const dx = Math.abs(x - this._startX);
+        if (dx > 6) this._moved = true;
     }
 
-    _updateDots() {
-        if (!this.element) return;
-        this.element.querySelectorAll('.slider-dot').forEach((d, i) =>
-            d.classList.toggle('active', i === this.currentSlide)
-        );
-    }
-
-    _updateCounter() {
-        const cur = this.element?.querySelector('.slider-current');
-        if (cur) cur.textContent = this.currentSlide + 1;
-    }
-
-    async _showSlideImage(index) {
-        if (!this.imageElement || !this.images[index]) return;
-        const url = this.images[index];
-        // لو عندنا blob URL جاهز في الكاش المحلي، استخدمه مباشرة
-        if (this._blobUrls[url]) {
-            this.imageElement.src = this._blobUrls[url];
-            return;
+    _dragEnd(x) {
+        this._dragging = false;
+        if (!this._moved) return;
+        const diff = this._startX - x;  // موجب = سحب يساراً = الصورة التالية
+        if (Math.abs(diff) > 30) {
+            diff > 0 ? this._go(this.cur + 1) : this._go(this.cur - 1);
         }
-        // تحقق IndexedDB
-        let blob = null;
-        try { blob = await this.storage.getImageBlob(url); } catch (e) {}
-        if (blob) {
-            const objUrl = URL.createObjectURL(blob);
-            this._blobUrls[url] = objUrl;
-            this.imageElement.src = objUrl;
-            return;
-        }
-        // تحميل مباشر
-        this.imageElement.src = url;
-        fetch(url, { mode: 'cors' }).then(r => r.blob()).then(b => {
-            this.storage.saveImageBlob(url, b).catch(() => {});
-            const objUrl = URL.createObjectURL(b);
-            this._blobUrls[url] = objUrl;
-        }).catch(() => {});
+        this._moved = false;
     }
 
-    async loadImage() {
-        if (!this.imageElement) return;
-        if (this.images.length === 0) { this.setPlaceholderImage(); return; }
-        await this._showSlideImage(0);
-        // preload الباقي
-        for (let i = 1; i < this.images.length; i++) this._preloadImage(this.images[i]);
-    }
-
-    async _preloadImage(url) {
-        if (!url || this._blobUrls[url]) return;
-        try {
-            let blob = await this.storage.getImageBlob(url);
-            if (!blob) {
-                const res = await fetch(url, { mode: 'cors' });
-                if (res.ok) { blob = await res.blob(); await this.storage.saveImageBlob(url, blob); }
-            }
-            if (blob) this._blobUrls[url] = URL.createObjectURL(blob);
-        } catch (e) {}
-    }
-
-    setPlaceholderImage() {
-        if (this.imageElement) this.imageElement.src = 'https://via.placeholder.com/300?text=No+Image';
-    }
-
+    // ─── UI ────────────────────────────────────────────────────────
     updateUI() {
         this.qtyInput.value = this.quantity;
         if (this.quantity > 0) {
@@ -243,28 +326,27 @@ export class ProductCard {
     changeQuantity(delta) {
         if (this.debounceTimer) clearTimeout(this.debounceTimer);
         this.debounceTimer = setTimeout(() => {
-            const newVal = this.quantity + delta;
-            const max = this.product.stock || 999;
-            if (newVal >= 0 && newVal <= max) {
-                this.quantity = newVal;
+            const v = Math.min(this.product.stock || 999, Math.max(0, this.quantity + delta));
+            const d = v - this.quantity;
+            if (d) {
+                this.quantity = v;
                 this.updateUI();
                 this.element.classList.add('added');
                 setTimeout(() => this.element.classList.remove('added'), 300);
-                if (this.onQuantityChange) this.onQuantityChange(this.product.name, this.quantity, delta);
+                if (this.onQuantityChange) this.onQuantityChange(this.product.name, v, d);
             }
             this.debounceTimer = null;
         }, 150);
     }
 
-    getQuantity() { return this.quantity; }
+    getQuantity()  { return this.quantity; }
+    getProduct()   { return this.product;  }
 
     setQuantity(qty) {
-        const newQty = Math.min(this.product.stock || 999, Math.max(0, qty));
-        const delta = newQty - this.quantity;
-        this.quantity = newQty;
+        const v = Math.min(this.product.stock || 999, Math.max(0, qty));
+        const d = v - this.quantity;
+        this.quantity = v;
         this.updateUI();
-        if (delta !== 0 && this.onQuantityChange) this.onQuantityChange(this.product.name, this.quantity, delta);
+        if (d && this.onQuantityChange) this.onQuantityChange(this.product.name, v, d);
     }
-
-    getProduct() { return this.product; }
 }
