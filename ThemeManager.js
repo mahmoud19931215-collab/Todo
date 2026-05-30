@@ -8,6 +8,7 @@ export class ThemeManager {
         this.nightElements = document.querySelector('.night-scene');
         this.themeToggleBtn = document.getElementById('themeToggle');
         this.themeIcon = this.themeToggleBtn?.querySelector('i');
+        
         this.applyTheme(this.currentTheme);
         this.initEventListeners();
     }
@@ -15,7 +16,7 @@ export class ThemeManager {
     loadTheme() {
         const saved = localStorage.getItem(CONFIG.STORAGE_KEYS.THEME);
         if (saved === 'dark' || saved === 'light') return saved;
-        // التحقق من تفضيل النظام فقط إذا كان المتصفح يدعمه
+        
         const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
         return prefersDark ? 'dark' : CONFIG.DEFAULT_THEME;
     }
@@ -58,6 +59,3 @@ export class ThemeManager {
         }
     }
 }
-
-
-
