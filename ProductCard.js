@@ -12,35 +12,30 @@ export class ProductCard {
         this.subtotalRow = null;
         this.debounceTimer = null;
         this.imageElement = null;
-        // --- Slider state ---
         this.currentSlide = 0;
         this.images = [];
+        this._blobUrls = {};   // كاش محلي للـ blob URLs لتجنب إعادة التحميل
     }
 
-    /** جمع كل روابط الصور المتاحة للمنتج */
     _collectImages() {
         const imgs = [];
-        // دعم أنواع مختلفة من هيكل البيانات
         if (Array.isArray(this.product.images)) {
             this.product.images.forEach(url => { if (url) imgs.push(url); });
         } else {
-            // الصور الثلاث: imageUrl, imageUrl2, imageUrl3 أو image_left/image_right
-            const candidates = [
+            [
                 this.product.imageUrl,
                 this.product.imageUrl2 || this.product.image_right,
                 this.product.imageUrl3 || this.product.image_left,
-            ];
-            candidates.forEach(url => { if (url) imgs.push(url); });
+            ].forEach(url => { if (url) imgs.push(url); });
         }
-        // تصفية الروابط غير الصالحة
         return imgs.filter(url => url && url.startsWith('http'));
     }
 
     render() {
         this.images = this._collectImages();
         const hasMultiple = this.images.length > 1;
-
         const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+
         const card = document.createElement('div');
         card.className = 'product-card';
         card.setAttribute('data-name', this.product.name);
@@ -49,27 +44,28 @@ export class ProductCard {
 
         const subtotalDisplay = this.quantity > 0
             ? `<div class="item-subtotal">المجموع: <span class="subtotal-val">${(this.quantity * this.product.price).toLocaleString()}</span> ل.س</div>`
-            : `<div class="item-subtotal" style="display: none;">المجموع: <span class="subtotal-val">0</span> ل.س</div>`;
+            : `<div class="item-subtotal" style="display:none;">المجموع: <span class="subtotal-val">0</span> ل.س</div>`;
 
-        const sliderDotsHtml = hasMultiple
-            ? `<div class="slider-dots">
-                ${this.images.map((_, i) => `<span class="slider-dot${i === 0 ? ' active' : ''}" data-index="${i}"></span>`).join('')}
-               </div>`
+        // النقاط فقط — بدون أزرار سهام
+        const dotsHtml = hasMultiple
+            ? `<div class="slider-dots">${this.images.map((_, i) =>
+                `<span class="slider-dot${i === 0 ? ' active' : ''}" data-index="${i}"></span>`
+              ).join('')}</div>`
             : '';
 
-        const sliderArrowsHtml = hasMultiple
-            ? `<button class="slider-arrow slider-prev" aria-label="السابق">&#8250;</button>
-               <button class="slider-arrow slider-next" aria-label="التالي">&#8249;</button>`
+        // مؤشر الصورة الحالية (1/3)
+        const counterHtml = hasMultiple
+            ? `<div class="slider-counter"><span class="slider-current">1</span>/<span class="slider-total">${this.images.length}</span></div>`
             : '';
 
         card.innerHTML = `
             <div class="product-img-wrapper${hasMultiple ? ' has-slider' : ''}">
-                <img class="product-img" id="${uniqueId}" 
-                     src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Crect width='200' height='200' fill='%23f0f0f0'/%3E%3Ctext x='100' y='110' text-anchor='middle' fill='%23999' font-size='14'%3Eتحميل...%3C/text%3E%3C/svg%3E" 
-                     alt="${escapeHtml(this.product.name)}"
-                     loading="lazy">
-                ${sliderArrowsHtml}
-                ${sliderDotsHtml}
+                <img class="product-img" id="${uniqueId}"
+                     src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect width='200' height='200' fill='%23f0f0f0'/%3E%3C/svg%3E"
+                     alt="${escapeHtml(this.product.name)}" loading="lazy">
+                ${hasMultiple ? `<div class="slider-zone zone-prev" aria-label="السابق"></div><div class="slider-zone zone-next" aria-label="التالي"></div>` : ''}
+                ${dotsHtml}
+                ${counterHtml}
             </div>
             <div class="product-info">
                 <div class="product-name">${escapeHtml(this.product.name)}</div>
@@ -89,52 +85,31 @@ export class ProductCard {
         this.subtotalRow = card.querySelector('.item-subtotal');
         this.imageElement = card.querySelector(`#${uniqueId}`);
 
-        const incBtn = card.querySelector('.inc-qty');
-        const decBtn = card.querySelector('.dec-qty');
-
-        incBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.changeQuantity(1);
-        });
-        decBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.changeQuantity(-1);
-        });
-
-        this.qtyInput.addEventListener('change', (e) => {
-            let newVal = parseInt(e.target.value);
-            if (isNaN(newVal)) newVal = 0;
-            const maxStock = this.product.stock || 999;
-            newVal = Math.min(maxStock, Math.max(0, newVal));
-            const delta = newVal - this.quantity;
-            if (delta !== 0) {
-                this.quantity = newVal;
-                this.updateUI();
-                if (this.onQuantityChange) {
-                    this.onQuantityChange(this.product.name, this.quantity, delta);
-                }
-            }
+        // أزرار الكمية
+        card.querySelector('.inc-qty').addEventListener('click', e => { e.stopPropagation(); this.changeQuantity(1); });
+        card.querySelector('.dec-qty').addEventListener('click', e => { e.stopPropagation(); this.changeQuantity(-1); });
+        this.qtyInput.addEventListener('change', e => {
+            let v = parseInt(e.target.value);
+            if (isNaN(v)) v = 0;
+            const max = this.product.stock || 999;
+            v = Math.min(max, Math.max(0, v));
+            const delta = v - this.quantity;
+            if (delta !== 0) { this.quantity = v; this.updateUI(); if (this.onQuantityChange) this.onQuantityChange(this.product.name, this.quantity, delta); }
             this.qtyInput.value = this.quantity;
         });
 
-        // أحداث السلايدر
         if (hasMultiple) {
-            // أزرار السهام
-            const prevBtn = card.querySelector('.slider-prev');
-            const nextBtn = card.querySelector('.slider-next');
-            if (prevBtn) prevBtn.addEventListener('click', (e) => { e.stopPropagation(); this.prevSlide(); });
-            if (nextBtn) nextBtn.addEventListener('click', (e) => { e.stopPropagation(); this.nextSlide(); });
+            // Zones اليمين واليسار
+            card.querySelector('.zone-prev').addEventListener('click', e => { e.stopPropagation(); this.prevSlide(); });
+            card.querySelector('.zone-next').addEventListener('click', e => { e.stopPropagation(); this.nextSlide(); });
 
             // النقاط
             card.querySelectorAll('.slider-dot').forEach(dot => {
-                dot.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.goToSlide(parseInt(dot.getAttribute('data-index')));
-                });
+                dot.addEventListener('click', e => { e.stopPropagation(); this.goToSlide(+dot.dataset.index); });
             });
 
-            // السحب باللمس (swipe)
-            this._initTouchSwipe(card.querySelector('.product-img-wrapper'));
+            // Swipe
+            this._initSwipe(card.querySelector('.product-img-wrapper'));
         }
 
         this.loadImage();
@@ -142,122 +117,123 @@ export class ProductCard {
         return card;
     }
 
-    /** تهيئة السحب باللمس */
-    _initTouchSwipe(wrapper) {
-        if (!wrapper) return;
-        let startX = 0;
-        let isDragging = false;
-        wrapper.addEventListener('touchstart', (e) => {
-            startX = e.touches[0].clientX;
-            isDragging = true;
+    _initSwipe(el) {
+        if (!el) return;
+        let sx = 0, sy = 0, moving = false;
+        el.addEventListener('touchstart', e => {
+            sx = e.touches[0].clientX;
+            sy = e.touches[0].clientY;
+            moving = false;
         }, { passive: true });
-        wrapper.addEventListener('touchend', (e) => {
-            if (!isDragging) return;
-            isDragging = false;
-            const diff = startX - e.changedTouches[0].clientX;
-            if (Math.abs(diff) > 40) {
-                // في RTL: السحب يميناً = الصورة التالية
+        el.addEventListener('touchmove', e => {
+            // منع scroll الصفحة لو كان السحب أفقي أكثر من عمودي
+            const dx = Math.abs(e.touches[0].clientX - sx);
+            const dy = Math.abs(e.touches[0].clientY - sy);
+            if (dx > dy && dx > 8) { moving = true; }
+        }, { passive: true });
+        el.addEventListener('touchend', e => {
+            const diff = sx - e.changedTouches[0].clientX;
+            if (moving && Math.abs(diff) > 25) {
                 diff > 0 ? this.nextSlide() : this.prevSlide();
             }
+            moving = false;
         }, { passive: true });
     }
 
     goToSlide(index) {
         if (!this.element || this.images.length <= 1) return;
-        this.currentSlide = (index + this.images.length) % this.images.length;
-        this._updateSliderUI();
-        this._loadSlideImage(this.currentSlide);
+        const prev = this.currentSlide;
+        this.currentSlide = ((index % this.images.length) + this.images.length) % this.images.length;
+        if (prev === this.currentSlide) return;
+        const dir = this.currentSlide > prev ? 'left' : 'right';
+        this._animateSlide(dir);
+        this._updateDots();
+        this._updateCounter();
+        this._showSlideImage(this.currentSlide);
     }
 
     nextSlide() { this.goToSlide(this.currentSlide + 1); }
     prevSlide() { this.goToSlide(this.currentSlide - 1); }
 
-    _updateSliderUI() {
-        if (!this.element) return;
-        // تحديث النقاط
-        this.element.querySelectorAll('.slider-dot').forEach((dot, i) => {
-            dot.classList.toggle('active', i === this.currentSlide);
-        });
-        // تأثير الانتقال على الصورة
-        if (this.imageElement) {
-            this.imageElement.classList.add('slide-fade');
-            setTimeout(() => this.imageElement && this.imageElement.classList.remove('slide-fade'), 280);
-        }
+    _animateSlide(dir) {
+        if (!this.imageElement) return;
+        const img = this.imageElement;
+        img.style.transition = 'none';
+        img.style.transform = dir === 'left' ? 'translateX(-12%)' : 'translateX(12%)';
+        img.style.opacity = '0.3';
+        // force reflow
+        img.offsetHeight;
+        img.style.transition = 'transform 0.22s cubic-bezier(0.25,0.46,0.45,0.94), opacity 0.18s ease';
+        img.style.transform = 'translateX(0)';
+        img.style.opacity = '1';
     }
 
-    async _loadSlideImage(index) {
+    _updateDots() {
+        if (!this.element) return;
+        this.element.querySelectorAll('.slider-dot').forEach((d, i) =>
+            d.classList.toggle('active', i === this.currentSlide)
+        );
+    }
+
+    _updateCounter() {
+        const cur = this.element?.querySelector('.slider-current');
+        if (cur) cur.textContent = this.currentSlide + 1;
+    }
+
+    async _showSlideImage(index) {
         if (!this.imageElement || !this.images[index]) return;
         const url = this.images[index];
-        // تحقق من الكاش أولاً
+        // لو عندنا blob URL جاهز في الكاش المحلي، استخدمه مباشرة
+        if (this._blobUrls[url]) {
+            this.imageElement.src = this._blobUrls[url];
+            return;
+        }
+        // تحقق IndexedDB
         let blob = null;
         try { blob = await this.storage.getImageBlob(url); } catch (e) {}
         if (blob) {
             const objUrl = URL.createObjectURL(blob);
+            this._blobUrls[url] = objUrl;
             this.imageElement.src = objUrl;
-            this.imageElement.onload = () => URL.revokeObjectURL(objUrl);
-            this.imageElement.onerror = () => { URL.revokeObjectURL(objUrl); this.imageElement.src = url; };
-        } else {
-            this.imageElement.src = url;
-            this.imageElement.onerror = () => this.setPlaceholderImage();
-            // تخزين في الخلفية
-            fetch(url, { mode: 'cors' }).then(r => r.blob()).then(b => this.storage.saveImageBlob(url, b)).catch(() => {});
+            return;
         }
+        // تحميل مباشر
+        this.imageElement.src = url;
+        fetch(url, { mode: 'cors' }).then(r => r.blob()).then(b => {
+            this.storage.saveImageBlob(url, b).catch(() => {});
+            const objUrl = URL.createObjectURL(b);
+            this._blobUrls[url] = objUrl;
+        }).catch(() => {});
     }
 
     async loadImage() {
         if (!this.imageElement) return;
-        // تحميل الصورة الأولى (الرئيسية)
         if (this.images.length === 0) { this.setPlaceholderImage(); return; }
-        await this._loadSlideImage(0);
-        // تحميل باقي الصور مسبقاً في الخلفية
-        for (let i = 1; i < this.images.length; i++) {
-            this._preloadImage(this.images[i]);
-        }
+        await this._showSlideImage(0);
+        // preload الباقي
+        for (let i = 1; i < this.images.length; i++) this._preloadImage(this.images[i]);
     }
 
     async _preloadImage(url) {
-        if (!url) return;
+        if (!url || this._blobUrls[url]) return;
         try {
-            const cached = await this.storage.getImageBlob(url);
-            if (!cached) {
+            let blob = await this.storage.getImageBlob(url);
+            if (!blob) {
                 const res = await fetch(url, { mode: 'cors' });
-                if (res.ok) {
-                    const blob = await res.blob();
-                    await this.storage.saveImageBlob(url, blob);
-                }
+                if (res.ok) { blob = await res.blob(); await this.storage.saveImageBlob(url, blob); }
             }
+            if (blob) this._blobUrls[url] = URL.createObjectURL(blob);
         } catch (e) {}
     }
 
-    async loadImageDirect() {
-        const imageUrl = this.images[0];
-        if (!imageUrl) { this.setPlaceholderImage(); return; }
-        try {
-            const res = await fetch(imageUrl, { mode: 'cors' });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const blob = await res.blob();
-            await this.storage.saveImageBlob(imageUrl, blob);
-            const url = URL.createObjectURL(blob);
-            this.imageElement.src = url;
-            this.imageElement.onload = () => URL.revokeObjectURL(url);
-            this.imageElement.onerror = () => { URL.revokeObjectURL(url); this.setPlaceholderImage(); };
-        } catch (err) {
-            this.imageElement.src = imageUrl;
-            this.imageElement.onerror = () => this.setPlaceholderImage();
-        }
-    }
-
     setPlaceholderImage() {
-        if (this.imageElement) {
-            this.imageElement.src = 'https://via.placeholder.com/300?text=No+Image';
-        }
+        if (this.imageElement) this.imageElement.src = 'https://via.placeholder.com/300?text=No+Image';
     }
 
     updateUI() {
         this.qtyInput.value = this.quantity;
         if (this.quantity > 0) {
-            const subtotal = this.quantity * this.product.price;
-            this.subtotalSpan.innerText = subtotal.toLocaleString();
+            this.subtotalSpan.innerText = (this.quantity * this.product.price).toLocaleString();
             this.subtotalRow.style.display = 'block';
         } else {
             this.subtotalRow.style.display = 'none';
@@ -268,15 +244,13 @@ export class ProductCard {
         if (this.debounceTimer) clearTimeout(this.debounceTimer);
         this.debounceTimer = setTimeout(() => {
             const newVal = this.quantity + delta;
-            const maxStock = this.product.stock || 999;
-            if (newVal >= 0 && newVal <= maxStock) {
+            const max = this.product.stock || 999;
+            if (newVal >= 0 && newVal <= max) {
                 this.quantity = newVal;
                 this.updateUI();
                 this.element.classList.add('added');
                 setTimeout(() => this.element.classList.remove('added'), 300);
-                if (this.onQuantityChange) {
-                    this.onQuantityChange(this.product.name, this.quantity, delta);
-                }
+                if (this.onQuantityChange) this.onQuantityChange(this.product.name, this.quantity, delta);
             }
             this.debounceTimer = null;
         }, 150);
@@ -289,9 +263,7 @@ export class ProductCard {
         const delta = newQty - this.quantity;
         this.quantity = newQty;
         this.updateUI();
-        if (delta !== 0 && this.onQuantityChange) {
-            this.onQuantityChange(this.product.name, this.quantity, delta);
-        }
+        if (delta !== 0 && this.onQuantityChange) this.onQuantityChange(this.product.name, this.quantity, delta);
     }
 
     getProduct() { return this.product; }
