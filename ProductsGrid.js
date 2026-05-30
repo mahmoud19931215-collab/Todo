@@ -1,4 +1,4 @@
-// ProductsGrid.js
+// ProductsGrid.js - كامل مع إصلاح شريط التحميل
 import { CONFIG } from './config.js';
 import { ProductCard } from './ProductCard.js';
 
@@ -72,7 +72,7 @@ export class ProductsGrid {
                 // معالجة المنتجات مرة واحدة وتخزينها
                 const validProducts = products.map(p => ({
                     ...p,
-                    imageUrl: (p.imageUrl && p.imageUrl.startsWith('http')) ? p.imageUrl : 'https://via.placeholder.com/300?text=No+Image',
+                    imageUrl: (p.imageUrl && p.imageUrl.startsWith('http')) ? p.imageUrl : CONFIG.IMAGE_PLACEHOLDER,
                     stock: (p.stock !== undefined && p.stock !== null) ? p.stock : 999
                 }));
                 const key = `${mainCat}|${subCat}`;
@@ -176,7 +176,6 @@ export class ProductsGrid {
         }
         
         if (this.renderQueue.length > 0) {
-            // استخدام requestIdleCallback أو setTimeout لتجنب حظر الواجهة
             if (typeof requestIdleCallback !== 'undefined') {
                 requestIdleCallback(() => this.processRenderQueue(), { timeout: 50 });
             } else {
@@ -205,7 +204,7 @@ export class ProductsGrid {
             const card = this.createCardInstance(product, mainCat, subCat);
             fragment.appendChild(card.element);
             this.cards.push({ mainCat, subCat, card, element: card.element });
-            this.totalImages++;
+            // totalImages يتم زيادتها داخل createCardInstance تلقائياً
         }
         innerDiv.appendChild(fragment);
         
@@ -242,7 +241,6 @@ export class ProductsGrid {
             const card = this.createCardInstance(product, mainCat, subCat);
             fragment.appendChild(card.element);
             this.cards.push({ mainCat, subCat, card, element: card.element });
-            this.totalImages++;
         }
         innerDiv.appendChild(fragment);
         
@@ -261,19 +259,35 @@ export class ProductsGrid {
         }
     }
 
+    // إصلاح: دالة إنشاء البطاقة مع حساب جميع الصور لشريط التحميل
     createCardInstance(product, mainCat, subCat) {
         const savedCart = this.getCartMapFromStorage();
         const initialQty = savedCart[product.name] || 0;
         const card = new ProductCard(product, this.storage, (name, newQty, delta) => this.onCardQuantityChange(name, newQty, delta), initialQty);
         const cardElement = card.render();
-        // تحميل الصور بكسلية
-        const img = cardElement.querySelector('.sl-img') || cardElement.querySelector('.product-img');
-        if (img && !img.complete) {
-            img.addEventListener('load', () => this.imageLoaded());
-            img.addEventListener('error', () => this.imageLoaded());
-        } else if (img) {
+        
+        // حساب عدد الصور في البطاقة (للسلايدر أو الصورة الواحدة)
+        const images = cardElement.querySelectorAll('.sl-img');
+        const imageCount = images.length || 1; // على الأقل صورة واحدة
+        
+        // إضافة إجمالي الصور إلى العداد الكلي
+        this.totalImages += imageCount;
+        
+        // إضافة مستمع لكل صورة لتحديث شريط التقدم
+        images.forEach(img => {
+            if (img.complete) {
+                this.imageLoaded();
+            } else {
+                img.addEventListener('load', () => this.imageLoaded());
+                img.addEventListener('error', () => this.imageLoaded());
+            }
+        });
+        
+        // إذا لم يتم العثور على صور (حالة نادرة) نعتبر الصورة محملة
+        if (imageCount === 0) {
             this.imageLoaded();
         }
+        
         return card;
     }
 
@@ -283,7 +297,6 @@ export class ProductsGrid {
         else cartMap[productName] = newQty;
         this.saveCartMap(cartMap);
         
-        // حساب الإجماليات بتمريرة واحدة
         let totalQty = 0;
         let totalPrice = 0;
         for (const cardObj of this.cards) {
@@ -312,7 +325,7 @@ export class ProductsGrid {
         this.activeMain = cat;
         this.activeSub = null;
         this.visibleSectionsCount = 6;
-        this.searchCache.clear();   // مسح كاش البحث لأن التصنيف تغير
+        this.searchCache.clear();
         this.buildAllSectionsList();
         this.resetAllPages();
         this.renderVisibleSections();
@@ -330,22 +343,19 @@ export class ProductsGrid {
     }
 
     filterBySearch(query) {
-        // Debounce لتجنب إعادة الرندر المتكررة أثناء الكتابة
         if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
         this.searchDebounceTimer = setTimeout(() => {
             const trimmedQuery = query.trim();
             this.searchQuery = trimmedQuery;
             if (trimmedQuery !== '') {
-                // عند البحث نعرض كل الأقسام التي تحتوي على نتائج
                 this.visibleSectionsCount = this.allSectionsList.length;
             } else {
                 this.visibleSectionsCount = 6;
             }
-            this.searchCache.clear();  // نمسح الكاش لأن الاستعلام تغير
+            this.searchCache.clear();
             this.resetAllPages();
             this.renderVisibleSections();
             
-            // حساب عدد النتائج (دون إعادة فلترة كاملة)
             if (!trimmedQuery) {
                 if (window.searchStatsCallback) window.searchStatsCallback(0);
                 return;
@@ -355,7 +365,6 @@ export class ProductsGrid {
             for (const { mainCat, subCat } of this.allSectionsList) {
                 const key = `${mainCat}|${subCat}`;
                 const products = this.productsMap.get(key) || [];
-                // نستخدم حلقة سريعة بدون تخزين مؤقت هنا لأنها حساب بسيط
                 for (let i = 0; i < products.length; i++) {
                     if (products[i].name.toLowerCase().includes(lowerQuery)) count++;
                 }
@@ -367,7 +376,6 @@ export class ProductsGrid {
             }
         }, CONFIG.DEBOUNCE_DELAY);
         
-        // إرجاع عدد سريع للاستخدام الخارجي (اختياري)
         if (!query.trim()) return 0;
         const lowerQuery = query.toLowerCase();
         let count = 0;
@@ -452,7 +460,6 @@ export class ProductsGrid {
         this.renderVisibleSections();
     }
 
-    // وظيفة مساعدة لتجنب XSS
     escapeHtml(str) {
         if (!str) return '';
         return str.replace(/[&<>]/g, function(m) {
