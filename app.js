@@ -8,379 +8,214 @@ import { ThemeManager } from './ThemeManager.js';
 
 class App {
     constructor() {
-        // الخدمات والمكونات
-        this.storage = null;
+        this.storage = new StorageService();
+        this.themeManager = null;
         this.productsGrid = null;
         this.categoryManager = null;
         this.cartManager = null;
-        this.themeManager = null;
-        
-        // الحالة
-        this.fullData = null;
+
+        this.allProductsRaw = [];
         this.isOnline = navigator.onLine;
-        this.initPromise = null;
-        this.abortController = null;        // لإلغاء طلبات الجلب السابقة
-        this.retryTimeout = null;           // لمنع التكرار في إعادة المحاولة
-        
-        // عناصر DOM الهامة (تخزينها مرة واحدة)
+
         this.elements = {
-            skeleton: null,
-            productsGrid: null,
-            progressBar: null,
-            progressFill: null,
-            searchInput: null,
-            clearSearch: null,
-            searchStats: null,
-            offlineToast: null,
-            cacheTime: null,
-            refreshBtn: null,
-            closeToastBtn: null,
-            offlinePage: null,
-            retryBtn: null,
-            settingsBtn: null,
-            settingsModal: null,
-            modalClose: null,
-            clearCacheBtn: null
+            searchInput: document.getElementById('searchInput'),
+            clearSearch: document.getElementById('clearSearch'),
+            refreshBtn: document.getElementById('refreshBtn'),
+            offlineBanner: document.getElementById('offlineBanner'),
+            settingsBtn: document.getElementById('settingsBtn'),
+            settingsModal: document.getElementById('settingsModal'),
+            closeModalBtn: document.getElementById('closeModalBtn'),
+            clearCacheBtn: document.getElementById('clearCacheBtn')
         };
-        
-        this.init();
     }
 
-    async init() {
-        // منع التهيئة المتكررة
-        if (this.initPromise) return this.initPromise;
-        
-        this.initPromise = (async () => {
-            // إنشاء خدمة التخزين
-            this.storage = new StorageService();
-            await this.storage.init();
-            
-            // مدير الثيم
-            this.themeManager = new ThemeManager();
-            
-            // تخزين مراجع العناصر الرئيسية
-            this._cacheElements();
-            
-            // إنشاء مدير السلة (بدون callback مؤقت)
-            this.cartManager = new CartManager(CONFIG.TARGET_NUMBER, (qty, total) => {});
-            
-            // إنشاء شبكة المنتجات
-            this.productsGrid = new ProductsGrid('productsGrid', this.storage, (totalQty, totalPrice) => {
-                if (this.cartManager) {
-                    this.cartManager.updateFromCartItems(this.productsGrid.getAllCartItems());
-                }
-            });
-            
-            // إنشاء مدير التصنيفات
-            this.categoryManager = new CategoryManager(
-                'mainChipsContainer',
-                'subChipsContainer',
-                (mainCat) => {
-                    if (!this.productsGrid) return;
-                    this.productsGrid.setActiveMainCategory(mainCat);
-                    if (mainCat !== 'all') {
-                        const subs = this.productsGrid.getSubCategoriesFor(mainCat);
-                        this.categoryManager.updateSubChips(mainCat, subs);
-                    } else {
-                        this.categoryManager.updateSubChips('all', []);
-                    }
-                },
-                (subCat) => {
-                    if (this.productsGrid) this.productsGrid.setActiveSubCategory(subCat);
-                }
-            );
-            
-            // ربط回调 إزالة العنصر في السلة
-            if (this.cartManager) {
-                this.cartManager.setRemoveItemCallback((productName) => {
-                    if (this.productsGrid) {
-                        this.productsGrid.removeItemFromCart(productName);
-                        this.cartManager.updateFromCartItems(this.productsGrid.getAllCartItems());
-                    }
-                });
-            }
-            
-            // إعداد شريط التقدم
-            this._setupProgressBar();
-            
-            // إعداد البحث
-            this._setupSearch();
-            
-            // عرض البيانات المخزنة مؤقتاً أولاً
-            const skeleton = this.elements.skeleton;
-            const gridDiv = this.elements.productsGrid;
-            const cachedData = await this.storage.getApiCache();
-            if (cachedData) {
-                this.renderFullData(cachedData);
-                this.showOfflineToast(true, this.storage.getLastUpdateTimestamp());
-                if (skeleton) skeleton.style.display = 'none';
-                if (gridDiv) gridDiv.style.display = 'grid';
-            }
-            
-            // ثم جلب البيانات الجديدة في الخلفية
-            this.fetchFreshData();
-            
-            // إعداد مستمعي الشبكة
-            this.setupNetworkListeners();
-            
-            // إعداد مودال الإعدادات
-            this.setupSettingsModal();
-        })();
-        
-        return this.initPromise;
+    async start() {
+        // 1. تشغيل واجهة التخزين أولاً والموازنة
+        await this.storage.init();
+
+        // 2. تفعيل المايسترو البصري للقوالب (Themes)
+        this.themeManager = new ThemeManager();
+
+        // 3. بناء شبكة العرض والمدراء مع حقن الميكانيكيات المتبادلة
+        this.productsGrid = new ProductsGrid('productsGrid', this.storage, (product, change) => {
+            this.cartManager.updateItemQuantity(product, change);
+        });
+
+        this.categoryManager = new CategoryManager(
+            'mainCategoriesContainer',
+            'subCategoriesContainer',
+            (mainCat) => this.productsGrid.setCategory(mainCat),
+            (subCat) => this.productsGrid.setCategory(subCat === 'all' ? this.categoryManager.currentMain : subCat)
+        );
+
+        this.cartManager = new CartManager(CONFIG.TARGET_NUMBER, this.storage, (currentCartMap) => {
+            this.productsGrid.render(currentCartMap);
+        });
+
+        // 4. تفعيل مستمعي الأحداث للواجهة العامة
+        this._setupGlobalEvents();
+
+        // 5. بدء جلب البيانات وضخها داخل التطبيق
+        await this.loadApplicationData();
     }
-    
-    _cacheElements() {
-        this.elements.skeleton = document.getElementById('skeletonLoader');
-        this.elements.productsGrid = document.getElementById('productsGrid');
-        this.elements.progressBar = document.getElementById('globalProgress');
-        this.elements.progressFill = this.elements.progressBar?.querySelector('.progress-fill');
-        this.elements.searchInput = document.getElementById('searchInput');
-        this.elements.clearSearch = document.getElementById('clearSearch');
-        this.elements.searchStats = document.getElementById('searchStats');
-        this.elements.offlineToast = document.getElementById('offlineToast');
-        this.elements.cacheTime = document.getElementById('cacheTime');
-        this.elements.refreshBtn = document.getElementById('refreshDataBtn');
-        this.elements.closeToastBtn = document.getElementById('closeToastBtn');
-        this.elements.offlinePage = document.getElementById('offlinePage');
-        this.elements.retryBtn = document.getElementById('retryConnection');
-        this.elements.settingsBtn = document.getElementById('settingsBtn');
-        this.elements.settingsModal = document.getElementById('settingsModal');
-        this.elements.modalClose = this.elements.settingsModal?.querySelector('.modal-close');
-        this.elements.clearCacheBtn = document.getElementById('clearCacheAction');
-    }
-    
-    _setupProgressBar() {
-        if (this.elements.progressBar && this.elements.progressFill && this.productsGrid) {
-            this.productsGrid.setImageProgressCallback((percent) => {
-                if (percent < 100 && percent > 0) {
-                    if (this.elements.progressBar) this.elements.progressBar.style.display = 'block';
-                    if (this.elements.progressFill) this.elements.progressFill.style.width = `${percent}%`;
-                } else {
-                    setTimeout(() => {
-                        if (this.elements.progressBar) this.elements.progressBar.style.display = 'none';
-                    }, 500);
-                }
-            });
+
+    async loadApplicationData() {
+        this.productsGrid.renderSkeletons();
+
+        // محاولة سحب الكاش من المخزن الداخلي لسرعة الاستجابة
+        const cachedData = await this.storage.getApiCache();
+        if (cachedData) {
+            console.log('[App] Rendering via local storage cache');
+            this._processAndDistributeData(cachedData);
         }
-    }
-    
-    _setupSearch() {
-        const searchInput = this.elements.searchInput;
-        const clearSearch = this.elements.clearSearch;
-        const searchStats = this.elements.searchStats;
-        
-        if (!searchInput) return;
-        
-        const handleSearch = (e) => {
-            const query = e.target.value;
-            if (!this.productsGrid) return;
-            const count = this.productsGrid.filterBySearch(query);
-            if (searchStats) {
-                searchStats.innerText = query.trim() ? `${count} نتيجة` : '';
-            }
-            if (clearSearch) clearSearch.style.display = query ? 'flex' : 'none';
-        };
-        
-        searchInput.addEventListener('input', handleSearch);
-        
-        if (clearSearch) {
-            clearSearch.addEventListener('click', () => {
-                if (searchInput) searchInput.value = '';
-                if (this.productsGrid) this.productsGrid.filterBySearch('');
-                if (searchStats) searchStats.innerText = '';
-                if (clearSearch) clearSearch.style.display = 'none';
-            });
-        }
-    }
-    
-    async fetchFreshData(retryCount = 0) {
-        // إلغاء أي طلب سابق
-        if (this.abortController) {
-            this.abortController.abort();
-        }
-        
-        const MAX_RETRIES = CONFIG.FETCH_RETRY_COUNT || 3;
-        this.abortController = new AbortController();
-        const signal = this.abortController.signal;
-        
-        try {
-            const timeoutId = setTimeout(() => this.abortController.abort(), CONFIG.FETCH_TIMEOUT);
-            const response = await fetch(CONFIG.API_URL, { signal });
-            clearTimeout(timeoutId);
-            
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const data = await response.json();
-            if (!data || typeof data !== 'object') throw new Error('Invalid data');
-            
-            // نجاح الجلب - حفظ وحفظ البيانات
-            await this.storage.saveApiCache(data);
-            this.renderFullData(data);
-            this.showOfflineToast(false);
-            this.hideOfflinePage();
-            
-        } catch (err) {
-            if (err.name === 'AbortError') {
-                console.log('[App] Fetch aborted');
-                return;
-            }
-            console.error(`[App] Fetch failed (attempt ${retryCount + 1}):`, err);
-            
-            if (retryCount < MAX_RETRIES - 1 && navigator.onLine) {
-                // تأخير تصاعدي مع إلغاء المؤقت السابق
-                if (this.retryTimeout) clearTimeout(this.retryTimeout);
-                const delay = Math.min(1000 * Math.pow(2, retryCount), 8000);
-                this.retryTimeout = setTimeout(() => {
-                    this.retryTimeout = null;
-                    this.fetchFreshData(retryCount + 1);
-                }, delay);
-                return;
-            }
-            
-            // فشل تام - عرض وضع عدم الاتصال إذا لم تكن هناك بيانات مخزنة
-            if (!this.fullData) {
-                this.showOfflinePage();
-            } else {
-                this.showOfflineToast(true, this.storage.getLastUpdateTimestamp());
-            }
-        } finally {
-            if (this.abortController && this.abortController.signal === signal) {
-                this.abortController = null;
-            }
-        }
-    }
-    
-    renderFullData(data) {
-        if (!data) return;
-        this.fullData = data;
-        if (this.productsGrid) {
-            this.productsGrid.loadData(data);
-            const mainCats = this.productsGrid.getMainCategories();
-            if (this.categoryManager) {
-                this.categoryManager.buildMainChips(mainCats);
-                const subMap = new Map();
-                for (const main of mainCats) {
-                    subMap.set(main, this.productsGrid.getSubCategoriesFor(main));
-                }
-                this.categoryManager.setSubCategoriesMap(subMap);
-                const currentMain = this.categoryManager.getCurrentMain();
-                if (currentMain && currentMain !== 'all') {
-                    this.categoryManager.selectMainCategory(currentMain);
-                }
-            }
-        }
-        
-        // إخفاء السكيلتون وإظهار الشبكة
-        if (this.elements.skeleton) this.elements.skeleton.style.display = 'none';
-        if (this.elements.productsGrid) this.elements.productsGrid.style.display = 'grid';
-    }
-    
-    showOfflineToast(isCached, timestamp) {
-        const toast = this.elements.offlineToast;
-        if (!toast) return;
-        
-        if (isCached) {
-            toast.style.display = 'flex';
-            if (this.elements.cacheTime && timestamp) {
-                this.elements.cacheTime.innerText = `آخر تحديث: ${new Date(timestamp).toLocaleTimeString()}`;
-            }
-            if (this.elements.refreshBtn) {
-                // إزالة المستمع القديم وإضافة مستمع جديد
-                const newBtn = this.elements.refreshBtn.cloneNode(true);
-                this.elements.refreshBtn.parentNode.replaceChild(newBtn, this.elements.refreshBtn);
-                this.elements.refreshBtn = newBtn;
-                this.elements.refreshBtn.onclick = () => {
-                    if (navigator.onLine) this.fetchFreshData();
-                    else alert('لا يوجد اتصال بالإنترنت');
-                };
-            }
-            if (this.elements.closeToastBtn) {
-                const newClose = this.elements.closeToastBtn.cloneNode(true);
-                this.elements.closeToastBtn.parentNode.replaceChild(newClose, this.elements.closeToastBtn);
-                this.elements.closeToastBtn = newClose;
-                this.elements.closeToastBtn.onclick = () => {
-                    if (toast) toast.style.display = 'none';
-                };
-            }
+
+        if (this.isOnline) {
+            await this.fetchFreshDataFromServer();
         } else {
-            toast.style.display = 'none';
+            this._toggleOfflineBanner(true);
+            if (!cachedData) {
+                this._showEmptyNetworkErrorState();
+            }
         }
     }
-    
-    showOfflinePage() {
-        const offlinePage = this.elements.offlinePage;
-        if (!offlinePage) return;
-        offlinePage.style.display = 'flex';
-        
-        if (this.elements.retryBtn) {
-            const newRetry = this.elements.retryBtn.cloneNode(true);
-            this.elements.retryBtn.parentNode.replaceChild(newRetry, this.elements.retryBtn);
-            this.elements.retryBtn = newRetry;
-            this.elements.retryBtn.onclick = () => {
-                if (navigator.onLine) {
-                    offlinePage.style.display = 'none';
-                    this.fetchFreshData();
-                } else {
-                    alert('لا توجد شبكة');
+
+    async fetchFreshDataFromServer() {
+        try {
+            const response = await fetch(CONFIG.API_URL, {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' }
+            });
+
+            if (!response.ok) throw new Error('Network spreadsheet fetch failed');
+            
+            const freshData = await response.json();
+            if (freshData && Array.isArray(freshData)) {
+                await this.storage.saveApiCache(freshData);
+                this._processAndDistributeData(freshData);
+                this._toggleOfflineBanner(false);
+            }
+        } catch (error) {
+            console.error('[App] Server fetch failed, layout intact', error);
+            if (!this.allProductsRaw || this.allProductsRaw.length === 0) {
+                this._showEmptyNetworkErrorState();
+            }
+        }
+    }
+
+    _processAndDistributeData(products) {
+        this.allProductsRaw = products;
+
+        // معالجة واستخلاص الفئات (Categories) وهيكلتها داخل الـ Maps
+        const mainCats = new Set();
+        const subsMap = new Map();
+
+        products.forEach(p => {
+            if (p.category) {
+                mainCats.add(p.category);
+                if (p.subCategory) {
+                    if (!subsMap.has(p.category)) subsMap.set(p.category, new Set());
+                    subsMap.get(p.category).add(p.subCategory);
                 }
-            };
+            }
+        });
+
+        // حقن الفئات لمدير القوائم
+        this.categoryManager.setSubCategoriesMap(subsMap);
+        this.categoryManager.renderMainCategories(Array.from(mainCats));
+
+        // دفع المنتجات لشبكة العرض والرندرة مع مطابقة السلة الحالية
+        this.productsGrid.setProducts(products);
+        this.productsGrid.render(this.cartManager.getCartMap());
+    }
+
+    _setupGlobalEvents() {
+        // مستمع البحث مع إخماد التأخير الخفيف
+        if (this.elements.searchInput) {
+            let searchTimeout = null;
+            this.elements.searchInput.addEventListener('input', (e) => {
+                clearTimeout(searchTimeout);
+                if (this.elements.clearSearch) {
+                    this.elements.clearSearch.style.display = e.target.value ? 'block' : 'none';
+                }
+                searchTimeout = setTimeout(() => {
+                    this.productsGrid.setSearch(e.target.value);
+                    this.productsGrid.render(this.cartManager.getCartMap());
+                }, CONFIG.DEBOUNCE_DELAY);
+            });
         }
-    }
-    
-    hideOfflinePage() {
-        if (this.elements.offlinePage) this.elements.offlinePage.style.display = 'none';
-    }
-    
-    setupNetworkListeners() {
+
+        if (this.elements.clearSearch) {
+            this.elements.clearSearch.addEventListener('click', () => {
+                this.elements.searchInput.value = '';
+                this.elements.clearSearch.style.display = 'none';
+                this.productsGrid.setSearch('');
+                this.productsGrid.render(this.cartManager.getCartMap());
+            });
+        }
+
+        if (this.elements.refreshBtn) {
+            this.elements.refreshBtn.addEventListener('click', () => {
+                if (this.isOnline) this.fetchFreshDataFromServer();
+            });
+        }
+
+        // مراقبة الاتصال والشبكة تلقائياً
         window.addEventListener('online', () => {
             this.isOnline = true;
-            this.hideOfflinePage();
-            // إلغاء أي مؤقت إعادة محاولة قائم
-            if (this.retryTimeout) {
-                clearTimeout(this.retryTimeout);
-                this.retryTimeout = null;
-            }
-            this.fetchFreshData();
+            this.fetchFreshDataFromServer();
         });
-        
         window.addEventListener('offline', () => {
             this.isOnline = false;
-            if (!this.fullData) this.showOfflinePage();
+            this._toggleOfflineBanner(true);
         });
+
+        this._setupSettingsModalLogic();
     }
-    
-    setupSettingsModal() {
-        const settingsBtn = this.elements.settingsBtn;
-        const modal = this.elements.settingsModal;
-        const closeBtn = this.elements.modalClose;
-        const clearCacheBtn = this.elements.clearCacheBtn;
+
+    _setupSettingsModalLogic() {
+        const { settingsBtn, settingsModal, closeModalBtn, clearCacheBtn } = this.elements;
         
-        if (!settingsBtn || !modal) return;
-        
-        const openModal = () => modal.classList.add('open');
-        const closeModal = () => modal.classList.remove('open');
-        
-        settingsBtn.addEventListener('click', openModal);
-        if (closeBtn) closeBtn.addEventListener('click', closeModal);
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) closeModal();
-        });
-        
+        if (settingsBtn && settingsModal) {
+            settingsBtn.addEventListener('click', () => settingsModal.classList.add('open'));
+            if (closeModalBtn) closeModalBtn.addEventListener('click', () => settingsModal.classList.remove('open'));
+            
+            settingsModal.addEventListener('click', (e) => {
+                if (e.target === settingsModal) settingsModal.classList.remove('open');
+            });
+        }
+
         if (clearCacheBtn) {
             clearCacheBtn.addEventListener('click', async () => {
-                if (confirm('سيتم مسح جميع الصور والبيانات المخزنة. هل أنت متأكد؟')) {
-                    if (this.storage) await this.storage.clearAllCache();
-                    alert('تم مسح الكاش، سيتم إعادة تحميل البيانات');
+                if (confirm('سيتم تنظيف كاش الصور والمنتجات بالكامل بشكل هندسي، هل تود الاستمرار؟')) {
+                    await this.storage.clearAllCache();
                     location.reload();
                 }
             });
         }
     }
+
+    _toggleOfflineBanner(show) {
+        if (this.elements.offlineBanner) {
+            this.elements.offlineBanner.style.display = show ? 'block' : 'none';
+        }
+    }
+
+    _showEmptyNetworkErrorState() {
+        const gridContainer = document.getElementById('productsGrid');
+        if (gridContainer) {
+            gridContainer.innerHTML = `
+                <div class="empty-grid-state">
+                    <i class="fas fa-wifi"></i>
+                    <p>أنت تصفح بدون إنترنت حالياً، ولا توجد نسخة مخزنة لعرضها. يرجى التحقق من اتصال الشبكة وإعادة المحاولة.</p>
+                </div>
+            `;
+        }
+    }
 }
 
-// بدء التطبيق بأمان
+// إقلاع التطبيق الهندسي الآمن
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => new App());
+    document.addEventListener('DOMContentLoaded', () => new App().start());
 } else {
-    new App();
+    new App().start();
 }
