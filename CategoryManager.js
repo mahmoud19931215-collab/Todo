@@ -1,7 +1,7 @@
 // CategoryManager.js
 export class CategoryManager {
     constructor(mainContainerId, subContainerId, onMainSelect, onSubSelect) {
-        // تخزين المراجع للعناصر
+        // تخزين المراجع
         this.mainContainer = document.getElementById(mainContainerId);
         this.subContainer = document.getElementById(subContainerId);
         this.onMainSelect = onMainSelect;
@@ -11,125 +11,123 @@ export class CategoryManager {
         this.currentMain = 'all';
         this.currentSub = null;
         this.mainCategories = ['all'];
-        this.subCategoriesMap = new Map();   // mainCat -> Set/Array of subCats
+        this.subCategoriesMap = new Map();   // mainCat -> array of subCats
         
-        // منع التحديثات المتكررة
-        this.selectMainDebounceTimer = null;
-        this.selectSubDebounceTimer = null;
+        // لتجنب التحديثات المتكررة (على سبيل المثال عند النقر السريع)
+        this.updateDebounceTimer = null;
         
-        // ربط المستمعات الرئيسية (باستخدام delegation)
-        this._bindMainContainerEvents();
+        // ربط الأحداث باستخدام delegation
+        this._bindEvents();
     }
 
-    // بناء التصنيفات الرئيسية مع الاحتفاظ بمراجع الـ chips
+    _bindEvents() {
+        // Delegation للحاوية الرئيسية (تجنب إضافة مستمع لكل زر)
+        if (this.mainContainer) {
+            this.mainContainer.addEventListener('click', (e) => {
+                const chip = e.target.closest('.chip');
+                if (!chip) return;
+                const mainCat = chip.getAttribute('data-main-cat');
+                if (mainCat && mainCat !== this.currentMain) {
+                    this.selectMainCategory(mainCat);
+                }
+            });
+        }
+        
+        // Delegation للحاوية الفرعية
+        if (this.subContainer) {
+            this.subContainer.addEventListener('click', (e) => {
+                const chip = e.target.closest('.chip');
+                if (!chip) return;
+                const subCat = chip.getAttribute('data-sub');
+                if (subCat && subCat !== this.currentSub) {
+                    this.selectSubCategory(subCat);
+                }
+            });
+        }
+    }
+
     buildMainChips(mainCatsArray) {
         if (!this.mainContainer) return;
         
-        // تفريغ الحاوية
-        this.mainContainer.innerHTML = '';
+        // تحديث قائمة التصنيفات الرئيسية
         this.mainCategories = ['all', ...mainCatsArray];
         
+        // استخدام DocumentFragment لبناء الأزرار دفعة واحدة
         const fragment = document.createDocumentFragment();
-        const chips = [];
-        
-        this.mainCategories.forEach(cat => {
+        for (const cat of this.mainCategories) {
             const chip = document.createElement('div');
             chip.className = 'chip';
             if (cat === 'all') chip.classList.add('active');
             chip.setAttribute('data-main-cat', cat);
             chip.textContent = cat === 'all' ? 'الكل' : cat;
-            // نضيف المستمع مباشرة (لا حاجة لـ delegation لأن عدد التصنيفات محدود)
-            chip.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.selectMainCategory(cat);
-            });
             fragment.appendChild(chip);
-            chips.push(chip);
-        });
+        }
         
-        this.mainContainer.appendChild(fragment);
-        this.mainChips = chips; // تخزين للإدارة المستقبلية
+        // تنظيف الحاوية وإضافة الأزرار الجديدة
+        this.mainContainer.replaceChildren(fragment);
     }
 
-    // تحديث التصنيفات الفرعية بناءً على التصنيف الرئيسي المختار
     updateSubChips(mainCat, subCatsArray) {
         if (!this.subContainer) return;
         
-        // إذا كان التصنيف الرئيسي 'all' أو لا توجد تصنيفات فرعية
+        // إذا كان التصنيف الرئيسي "الكل" أو لا يوجد تصنيفات فرعية
         if (mainCat === 'all' || !subCatsArray || subCatsArray.length === 0) {
             this.subContainer.style.display = 'none';
-            this.subContainer.innerHTML = '';
             this.currentSub = null;
             this.onSubSelect('all');
             return;
         }
         
         this.subContainer.style.display = 'flex';
-        this.subContainer.innerHTML = '';
         
+        // بناء الأزرار (بما في ذلك زر "الكل")
         const fragment = document.createDocumentFragment();
         
-        // إضافة chip "الكل"
+        // زر "الكل" للتصنيفات الفرعية
         const allChip = document.createElement('div');
-        allChip.className = 'chip sub-active';
+        allChip.className = 'chip sub-active';  // active افتراضياً
         allChip.setAttribute('data-sub', 'all');
         allChip.textContent = 'الكل';
-        allChip.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.selectSubCategory('all');
-        });
         fragment.appendChild(allChip);
         
-        // إضافة التصنيفات الفرعية
-        subCatsArray.forEach(sub => {
+        // أزرار التصنيفات الفرعية
+        for (const sub of subCatsArray) {
             const chip = document.createElement('div');
             chip.className = 'chip';
             chip.setAttribute('data-sub', sub);
             chip.textContent = sub;
-            chip.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.selectSubCategory(sub);
-            });
             fragment.appendChild(chip);
-        });
+        }
         
-        this.subContainer.appendChild(fragment);
+        this.subContainer.replaceChildren(fragment);
         
-        // ضبط الحالة الافتراضية
+        // إعادة ضبط الحالة
         this.currentSub = 'all';
         this.onSubSelect('all');
     }
 
-    // اختيار تصنيف رئيسي مع debounce
     selectMainCategory(cat) {
         if (this.currentMain === cat) return;
         
-        if (this.selectMainDebounceTimer) clearTimeout(this.selectMainDebounceTimer);
-        this.selectMainDebounceTimer = setTimeout(() => {
+        // منع التحديث المتكرر (إذا كان هناك تأخير)
+        if (this.updateDebounceTimer) clearTimeout(this.updateDebounceTimer);
+        
+        this.updateDebounceTimer = setTimeout(() => {
             this.currentMain = cat;
             
-            // تحديث الفئة النشطة في الـ chips
-            if (this.mainContainer) {
-                const chips = this.mainContainer.querySelectorAll('.chip');
-                chips.forEach(chip => {
-                    const chipCat = chip.getAttribute('data-main-cat');
-                    if (chipCat === cat) chip.classList.add('active');
-                    else chip.classList.remove('active');
-                });
+            // تحديث حالة الأزرار الرئيسية
+            const chips = this.mainContainer.querySelectorAll('.chip');
+            for (const chip of chips) {
+                const chipCat = chip.getAttribute('data-main-cat');
+                if (chipCat === cat) chip.classList.add('active');
+                else chip.classList.remove('active');
             }
             
-            // إعادة تعيين التصنيف الفرعي
             this.currentSub = null;
-            
-            // استدعاء المعاودة الخارجية
             this.onMainSelect(cat);
             
-            // إدارة التصنيفات الفرعية
             if (cat === 'all') {
-                if (this.subContainer) {
-                    this.subContainer.style.display = 'none';
-                    this.subContainer.innerHTML = '';
-                }
+                this.subContainer.style.display = 'none';
                 this.currentSub = null;
                 this.onSubSelect('all');
             } else {
@@ -137,34 +135,25 @@ export class CategoryManager {
                 this.updateSubChips(cat, subs);
             }
             
-            this.selectMainDebounceTimer = null;
-        }, 10);
+            this.updateDebounceTimer = null;
+        }, 10);  // تأخير بسيط لتجنب التحديثات المتزامنة
     }
 
-    // اختيار تصنيف فرعي مع debounce
     selectSubCategory(sub) {
         if (this.currentSub === sub) return;
+        this.currentSub = sub;
         
-        if (this.selectSubDebounceTimer) clearTimeout(this.selectSubDebounceTimer);
-        this.selectSubDebounceTimer = setTimeout(() => {
-            this.currentSub = sub;
-            
-            // تحديث الفئة النشطة في الـ chips الفرعية
-            if (this.subContainer) {
-                const chips = this.subContainer.querySelectorAll('.chip');
-                chips.forEach(chip => {
-                    const chipSub = chip.getAttribute('data-sub');
-                    if (chipSub === sub) chip.classList.add('sub-active');
-                    else chip.classList.remove('sub-active');
-                });
-            }
-            
-            this.onSubSelect(sub);
-            this.selectSubDebounceTimer = null;
-        }, 10);
+        // تحديث حالة الأزرار الفرعية
+        const chips = this.subContainer.querySelectorAll('.chip');
+        for (const chip of chips) {
+            const chipSub = chip.getAttribute('data-sub');
+            if (chipSub === sub) chip.classList.add('sub-active');
+            else chip.classList.remove('sub-active');
+        }
+        
+        this.onSubSelect(sub);
     }
 
-    // تعيين خريطة التصنيفات الفرعية (من ProductsGrid)
     setSubCategoriesMap(map) {
         this.subCategoriesMap = map;
     }
@@ -177,51 +166,14 @@ export class CategoryManager {
         return this.currentSub;
     }
     
-    // إعادة تعيين الحالة إلى الوضع الافتراضي
-    reset() {
-        this.currentMain = 'all';
-        this.currentSub = null;
-        if (this.mainContainer) {
-            const chips = this.mainContainer.querySelectorAll('.chip');
-            chips.forEach(chip => {
-                const chipCat = chip.getAttribute('data-main-cat');
-                if (chipCat === 'all') chip.classList.add('active');
-                else chip.classList.remove('active');
-            });
-        }
-        if (this.subContainer) {
-            this.subContainer.style.display = 'none';
-            this.subContainer.innerHTML = '';
-        }
-        this.onMainSelect('all');
-        this.onSubSelect('all');
-    }
-    
-    // تنظيف (لتجنب تسرب الذاكرة)
+    // تنظيف (اختياري)
     destroy() {
-        if (this.selectMainDebounceTimer) clearTimeout(this.selectMainDebounceTimer);
-        if (this.selectSubDebounceTimer) clearTimeout(this.selectSubDebounceTimer);
-        // إزالة جميع المستمعات من الـ chips (إذا أردنا)
         if (this.mainContainer) {
-            const chips = this.mainContainer.querySelectorAll('.chip');
-            chips.forEach(chip => {
-                const newChip = chip.cloneNode(true);
-                chip.parentNode?.replaceChild(newChip, chip);
-            });
+            this.mainContainer.replaceChildren();  // إزالة جميع الأزرار
         }
         if (this.subContainer) {
-            const chips = this.subContainer.querySelectorAll('.chip');
-            chips.forEach(chip => {
-                const newChip = chip.cloneNode(true);
-                chip.parentNode?.replaceChild(newChip, chip);
-            });
+            this.subContainer.replaceChildren();
         }
-        this.mainChips = null;
-    }
-    
-    // ربط أحداث الحاويات (يمكن إضافة مستمعات عامة إذا احتجنا)
-    _bindMainContainerEvents() {
-        // أي مستمعات إضافية على مستوى الحاوية يمكن وضعها هنا
-        // لكننا بالفعل استخدمنا مستمعات فردية على كل chip لتحسين الأداء
+        if (this.updateDebounceTimer) clearTimeout(this.updateDebounceTimer);
     }
 }
