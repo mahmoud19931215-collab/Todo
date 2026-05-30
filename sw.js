@@ -1,115 +1,82 @@
-// sw.js - نسخة هندسية مطهرة ومقاومة لظروف انقطاع الشبكة والاتصالات البطيئة
-const CACHE_NAME = 'aleppo-delivery-v1.0.1'; // تم تحديث الإصدار لفرض تحديث ملف config.js الجديد
+// sw.js - مدير الشبكة والتخزين المؤقت لمتجر حلب للتوصيل
+const CACHE_NAME = 'aleppo-delivery-v1.0.3'; // تم رفع الإصدار لفرض التحديث
 const OFFLINE_URL = './offline.html';
 
-// الملفات الاستراتيجية والحرجة التي يتوجب حزمها مسبقاً لضمان العمل التام Offline
+// الملفات الأساسية الحرجة للإقلاع فقط (بدون الـ API)
 const PRECACHE_URLS = [
-  './',
-  './index.html',
-  './offline.html',
-  './style.css',
-  './config.js',
-  './StorageService.js',
-  './ThemeManager.js',
-  './ProductCard.js',
-  './ProductsGrid.js',
-  './CategoryManager.js',
-  './CartManager.js',
-  './app.js',
-  './manifest.json',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css',
-  'https://unpkg.com/dexie@3.2.4/dist/dexie.js'
+    './',
+    './index.html',
+    './offline.html',
+    './style.css',
+    './app.js',
+    './manifest.json',
+    './config.js',
+    './StorageService.js',
+    './ProductCard.js',
+    './ProductsGrid.js',
+    './CategoryManager.js',
+    './CartManager.js',
+    './ThemeManager.js'
 ];
 
-// تثبيت الـ Service Worker وحقن الملفات الأساسية في الكاش
+// 1. مرحلة التثبيت: تخزين ملفات الواجهة الأساسية
 self.addEventListener('install', event => {
-  console.log('[SW] Installing structural assets...');
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => {
-        // استخدام addAll بشكل صارم لضمان تخزين الأصول الأساسية
-        return cache.addAll(PRECACHE_URLS);
-      })
-      .then(() => self.skipWaiting())
-  );
-});
-
-// تفعيل وتطهير الكاشات القديمة لعدم تعليق المتصفحات
-self.addEventListener('activate', event => {
-  console.log('[SW] Activating and cleansing old structures...');
-  event.waitUntil(
-    caches.keys().then(cacheNames => {
-      return Promise.all(
-        cacheNames.map(cache => {
-          if (cache !== CACHE_NAME) {
-            console.log('[SW] Deleting deprecated cache:', cache);
-            return caches.delete(cache);
-          }
+    self.skipWaiting(); // إجبار المتصفح على تفعيل النسخة الجديدة فوراً
+    event.waitUntil(
+        caches.open(CACHE_NAME).then(cache => {
+            console.log('[SW] Pre-caching core assets');
+            return cache.addAll(PRECACHE_URLS);
         })
-      );
-    }).then(() => self.clients.claim())
-  );
+    );
 });
 
-// ميكانيكية استراتيجية الاستجابة المحدثة (Stale-While-Revalidate) مع معالجة حماية الفشل
-async function staleWhileRevalidate(request) {
-  const cache = await caches.open(CACHE_NAME);
-  const cachedResponse = await cache.match(request);
-  
-  const fetchPromise = fetch(request).then(async networkResponse => {
-    // التأكد من جودة الاستجابة وسلامتها قبل تخزينها لمنع كاش الملفات التالفة
-    if (networkResponse && networkResponse.status === 200) {
-      await cache.put(request, networkResponse.clone());
-    }
-    return networkResponse;
-  }).catch(err => {
-    console.warn('[SW] Fetch failed in revalidation, using cache fallback for:', request.url, err);
-  });
+// 2. مرحلة التفعيل: تنظيف الكاش القديم
+self.addEventListener('activate', event => {
+    event.waitUntil(
+        caches.keys().then(cacheNames => {
+            return Promise.all(
+                cacheNames.map(cacheName => {
+                    if (cacheName !== CACHE_NAME) {
+                        console.log('[SW] Deleting old cache:', cacheName);
+                        return caches.delete(cacheName);
+                    }
+                })
+            );
+        }).then(() => self.clients.claim())
+    );
+});
 
-  return cachedResponse || fetchPromise;
-}
-
-// معالجة طلبات التصفح والانتقال (Navigation Requests)
-async function handleNavigation(event) {
-  try {
-    return await staleWhileRevalidate(event.request);
-  } catch (error) {
-    console.error('[SW] Navigation failed, routing to official offline screen', error);
-    const cache = await caches.open(CACHE_NAME);
-    const offlinePage = await cache.match(OFFLINE_URL);
-    return offlinePage || new Response('خطأ في الاتصال بالشبكة', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
-  }
-}
-
-// معالج الجلب والاعتراض المركزي للملفات والأصول والخطوط
+// 3. مرحلة الاعتراض (Fetch): توجيه ذكي للطلبات
 self.addEventListener('fetch', event => {
-  const request = event.request;
-  const url = new URL(request.url);
+    const url = new URL(event.request.url);
 
-  // استبعاد خطوط إمداد بيانات الـ API من نطاق كاش الـ SW لأنها تدار مباشرة عبر طبقة StorageService (IndexedDB)
-  if (url.href.includes('script.google.com') || url.href.includes('exec')) {
-    return;
-  }
+    // 🚨 التخطي الهندسي: تجاهل طلبات Google API تماماً وتركها لـ StorageService.js
+    if (url.href.includes('script.google.com') || url.href.includes('script.googleusercontent.com')) {
+        return; // خروج مبكر، المتصفح سيتعامل مع الطلب مباشرة
+    }
 
-  // فرز طلبات الصور والخطوط وتطبيق التخزين السريع الآمن لها
-  if (request.destination === 'image' || request.destination === 'font') {
-    event.respondWith(staleWhileRevalidate(request));
-    return;
-  }
+    // استراتيجية Cache First, Fallback to Network لباقي الملفات والصور
+    event.respondWith(
+        caches.match(event.request).then(cachedResponse => {
+            if (cachedResponse) {
+                return cachedResponse;
+            }
 
-  // استراتيجية طلبات التنقل الكلية للموقع لتوجيهها لصفحة الـ Offline عند الفشل الكامل
-  if (request.mode === 'navigate') {
-    event.respondWith(handleNavigation(event));
-    return;
-  }
-
-  // باقي الملفات البرمجية والأنماط (JS, CSS)
-  event.respondWith(staleWhileRevalidate(request));
+            return fetch(event.request).catch(() => {
+                // في حال انقطاع الشبكة وطلب المستخدم لصفحة تنقل، نعرض صفحة الأوفلاين
+                if (event.request.mode === 'navigate') {
+                    return caches.match(OFFLINE_URL);
+                }
+            });
+        })
+    );
 });
 
-// استقبال الرسائل والأوامر الإدارية المباشرة من التطبيق
+// 4. استقبال أوامر التنظيف من التطبيق
 self.addEventListener('message', event => {
-  if (event.data && event.data.action === 'skipWaiting') {
-    self.skipWaiting();
-  }
+    if (event.data === 'CLEAR_CACHE') {
+        caches.keys().then(names => {
+            for (let name of names) caches.delete(name);
+        });
+    }
 });
