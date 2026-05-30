@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#2ecc71">
+    <title>Todoo</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/dexie@3.2.4/dist/dexie.js"></script>
+    
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+</head>
+<body>
+    <div class="animated-bg">
+        <div class="day-scene">
+            <div class="sun"></div>
+            <div class="cloud c1"></div>
+            <div class="cloud c2"></div>
+            <div class="cloud c3"></div>
+        </div>
+        <div class="night-scene" style="display:none;">
+            <div class="moon"></div>
+            <div class="stars">
+                <div class="star"></div><div class="star"></div><div class="star"></div>
+                <div class="star"></div><div class="star"></div><div class="star"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="globalProgress" class="global-progress" style="display: none;"><div class="progress-fill"></div></div>
+    <div id="offlineToast" class="offline-toast" style="display: none;">
+        <i class="fas fa-database"></i> <span>نسخة مخزنة مؤقتاً</span> <span id="cacheTime"></span>
+        <button id="refreshDataBtn">تحديث</button> <button id="closeToastBtn">&times;</button>
+    </div>
+
+    <header class="app-header">
+        <div class="header-actions">
+            <button id="themeToggle" class="icon-btn"><i class="fas fa-moon"></i></button>
+            <button id="cartDrawerBtn" class="icon-btn cart-icon"><i class="fas fa-shopping-cart"></i><span id="cartBadge" class="badge">0</span></button>
+            <button id="settingsBtn" class="icon-btn"><i class="fas fa-cog"></i></button>
+        </div>
+        <div class="search-container">
+            <i class="fas fa-search search-icon"></i>
+            <input type="text" id="searchInput" placeholder="ابحث عن منتج..." autocomplete="off">
+            <button id="clearSearch" class="clear-search" style="display: none;">✖</button>
+        </div>
+        <div id="searchStats" class="search-stats"></div>
+    </header>
+
+    <div class="chips-horizontal" id="mainChipsContainer"><div class="chip active" data-cat="all">الكل</div></div>
+    <div class="chips-horizontal sub-chips" id="subChipsContainer" style="display: none;"></div>
+
+    <main class="main-container" id="mainContainer">
+        <div id="skeletonLoader" class="skeleton-grid">
+            <div class="skeleton-card"><div class="skeleton-img"></div><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+            <div class="skeleton-card"><div class="skeleton-img"></div><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+            <div class="skeleton-card"><div class="skeleton-img"></div><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+        </div>
+        <div id="productsGrid" class="products-grid" style="display: none;"></div>
+    </main>
+
+    <div id="cartFooter" class="cart-floating-footer">
+        <div class="total-info"><span class="total-label">الإجمالي</span><span id="grandTotal" class="total-value">0</span><span class="currency">ل.س</span></div>
+        <button id="whatsappFooterBtn" class="whatsapp-btn"><i class="fab fa-whatsapp"></i> إتمام الطلب</button>
+    </div>
+
+    <div id="cartDrawer" class="drawer">
+        <div class="drawer-header"><h3><i class="fas fa-shopping-cart"></i> سلة المشتريات</h3><button class="drawer-close">&times;</button></div>
+        <div id="cartItemsList" class="drawer-body"><div class="empty-cart">سلة فارغة</div></div>
+        <div class="drawer-footer"><div class="drawer-total">المجموع: <span id="drawerTotal">0</span> ل.س</div><button id="drawerWhatsappBtn" class="whatsapp-btn">إرسال الطلب <i class="fab fa-whatsapp"></i></button></div>
+    </div>
+    <div id="cartOverlay" class="drawer-overlay"></div>
+
+    <div id="settingsModal" class="modal">
+        <div class="modal-card">
+            <div class="modal-header"><span>الإعدادات</span><button class="modal-close">&times;</button></div>
+            <div class="modal-body"><button id="clearCacheAction" class="danger-btn"><i class="fas fa-trash-alt"></i> مسح الكاش (الصور والبيانات)</button><p class="hint">سيتم حذف جميع الملفات المخزنة مؤقتاً وإعادة تحميلها من الخادم.</p></div>
+        </div>
+    </div>
+
+    <div id="offlinePage" class="fullscreen-offline" style="display: none;">
+        <i class="fas fa-wifi-slash"></i><h2>لا يوجد اتصال بالإنترنت</h2><p>لا توجد بيانات مخزنة مسبقاً. يرجى التحقق من الشبكة.</p><button id="retryConnection">إعادة المحاولة</button>
+    </div>
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('[SW] Registered:', reg.scope))
+                    .catch(err => console.warn('[SW] Registration failed:', err));
+            });
+        }
+    </script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>
