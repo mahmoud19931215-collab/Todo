@@ -177,14 +177,14 @@
         }
         .product-cell {
             float: right;
-            width: 50%;
+            width: 100%;
             padding: 4px;
             -webkit-box-sizing: border-box;
             -moz-box-sizing: border-box;
             box-sizing: border-box;
         }
-        @media (min-width: 480px) { .product-cell { width: 33.333%; } }
-        @media (min-width: 700px) { .product-cell { width: 25%; } }
+        @media (min-width: 480px) { .product-cell { width: 50%; } }
+        @media (min-width: 700px) { .product-cell { width: 33.333%; } }
 
         .product-card {
             background: #fff;
@@ -193,12 +193,21 @@
             -webkit-box-shadow: 0 2px 6px rgba(0,0,0,0.08);
             box-shadow: 0 2px 6px rgba(0,0,0,0.08);
         }
+        /* الكرت أفقي: صورة على اليسار، معلومات على اليمين */
+        .product-card:after {
+            content: "";
+            display: table;
+            clear: both;
+        }
         .product-img-wrap {
-            width: 100%;
-            padding-top: 100%;
+            float: right;
+            width: 110px;
+            height: 110px;
             position: relative;
             background: #f5f5f5;
             overflow: hidden;
+            -webkit-flex-shrink: 0;
+            flex-shrink: 0;
         }
         .product-img-wrap img {
             position: absolute;
@@ -211,78 +220,63 @@
             position: absolute;
             top: 0; left: 0;
             width: 100%; height: 100%;
-            display: -webkit-box;
-            display: -webkit-flex;
-            display: flex;
-            -webkit-box-align: center;
-            -webkit-align-items: center;
-            align-items: center;
-            -webkit-box-pack: center;
-            -webkit-justify-content: center;
-            justify-content: center;
+            text-align: center;
+            padding-top: 34px;
             color: #ccc;
             font-size: 36px;
         }
-        .product-info { padding: 8px 10px 10px; }
+        .product-info {
+            overflow: hidden;
+            padding: 10px 12px 10px 10px;
+            min-height: 110px;
+        }
         .product-name {
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 600;
             color: #333;
             margin-bottom: 4px;
-            line-height: 1.3;
-            max-height: 2.6em;
-            overflow: hidden;
+            line-height: 1.4;
         }
         .product-price {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 800;
             color: #2ecc71;
-            margin-bottom: 8px;
+            margin-bottom: 10px;
         }
         .product-price span { font-size: 11px; font-weight: 400; color: #888; }
 
         /* qty controls */
         .qty-wrap {
-            display: -webkit-box;
-            display: -webkit-flex;
-            display: flex;
-            -webkit-box-align: center;
-            -webkit-align-items: center;
-            align-items: center;
-            -webkit-box-pack: center;
-            -webkit-justify-content: center;
-            justify-content: center;
-            gap: 0;
+            overflow: hidden;
         }
         .qty-btn {
             background: #2ecc71;
             border: none;
             color: #fff;
-            width: 30px;
-            height: 30px;
+            width: 32px;
+            height: 32px;
             border-radius: 50%;
-            font-size: 18px;
+            font-size: 20px;
             line-height: 1;
             cursor: pointer;
             font-family: inherit;
-            -webkit-flex-shrink: 0;
-            flex-shrink: 0;
+            float: right;
         }
         .qty-btn:active { background: #27ae60; }
         .qty-display {
-            min-width: 32px;
+            float: right;
+            min-width: 30px;
             text-align: center;
             font-size: 15px;
             font-weight: 700;
             color: #333;
-            padding: 0 6px;
+            padding: 6px 4px 0;
         }
         .add-btn {
-            width: 100%;
             background: #2ecc71;
             border: none;
             color: #fff;
-            padding: 7px 0;
+            padding: 7px 18px;
             border-radius: 8px;
             font-size: 14px;
             cursor: pointer;
