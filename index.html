@@ -749,38 +749,41 @@ function renderProducts(products) {
 
 // ==================== CATEGORIES ====================
 function buildCategories(data) {
-    var mainSet = {};
-    var subMap = {};
     state.allProducts = [];
     state.productMap = {};
+    state.mainCats = [];
+    state.subMap = {};
 
-    // Support both array and object formats from Google Sheets
-    var items = Array.isArray(data) ? data : (data.products || data.items || []);
+    // Format: { "mainCat": { "subCat": [ {name, price, imageUrl, ...} ] } }
+    for (var mainCat in data) {
+        if (!data.hasOwnProperty(mainCat)) continue;
+        state.mainCats.push(mainCat);
+        state.subMap[mainCat] = [];
+        var subObj = data[mainCat];
 
-    for (var i = 0; i < items.length; i++) {
-        var p = items[i];
-        if (!p || !p.name) continue;
-        state.allProducts.push(p);
-        state.productMap[p.name] = p;
+        for (var subCat in subObj) {
+            if (!subObj.hasOwnProperty(subCat)) continue;
+            state.subMap[mainCat].push(subCat);
+            var products = subObj[subCat];
 
-        var main = p.category || p.mainCategory || p.main_category || '';
-        var sub = p.subCategory || p.sub_category || p.subcategory || '';
-        if (main) {
-            mainSet[main] = true;
-            if (sub) {
-                if (!subMap[main]) subMap[main] = {};
-                subMap[main][sub] = true;
+            for (var i = 0; i < products.length; i++) {
+                var p = products[i];
+                if (!p || !p.name) continue;
+                // attach category info directly on product
+                var product = {
+                    name: p.name,
+                    price: p.price || 0,
+                    image: p.imageUrl || p.image || '',
+                    stock: p.stock || 0,
+                    details: p.details || '',
+                    videoUrl: p.videoUrl || '',
+                    mainCat: mainCat,
+                    subCat: subCat
+                };
+                state.allProducts.push(product);
+                state.productMap[p.name] = product;
             }
         }
-    }
-
-    state.mainCats = [];
-    for (var cat in mainSet) state.mainCats.push(cat);
-
-    state.subMap = {};
-    for (var m in subMap) {
-        state.subMap[m] = [];
-        for (var s in subMap[m]) state.subMap[m].push(s);
     }
 
     // Build main chips
@@ -834,18 +837,14 @@ function filterAndRender() {
     if (state.activeMain !== 'all') {
         var filtered = [];
         for (var i = 0; i < products.length; i++) {
-            var p = products[i];
-            var main = p.category || p.mainCategory || p.main_category || '';
-            if (main === state.activeMain) filtered.push(p);
+            if (products[i].mainCat === state.activeMain) filtered.push(products[i]);
         }
         products = filtered;
     }
     if (state.activeSub !== 'all') {
         var filtered2 = [];
         for (var i = 0; i < products.length; i++) {
-            var p = products[i];
-            var sub = p.subCategory || p.sub_category || p.subcategory || '';
-            if (sub === state.activeSub) filtered2.push(p);
+            if (products[i].subCat === state.activeSub) filtered2.push(products[i]);
         }
         products = filtered2;
     }
